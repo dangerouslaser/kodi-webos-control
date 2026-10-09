@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<settings version="1">
+  <section id="service.webostv">
+    <category id="connection" label="32000" help="">
+      <group id="1">
+        <setting id="host" type="string" label="32001" help="32051">
+          <level>0</level>
+          <default>127.0.0.1</default>
+          <constraints>
+            <allowempty>false</allowempty>
+          </constraints>
+          <control type="edit" format="string">
+            <heading>32001</heading>
+          </control>
+        </setting>
+        <setting id="loopback_fallback" type="boolean" label="32002" help="32052">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="mac" type="string" label="32003" help="32053">
+          <level>0</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <control type="edit" format="string">
+            <heading>32003</heading>
+          </control>
+        </setting>
+        <setting id="connect_timeout" type="integer" label="32004" help="32054">
+          <level>2</level>
+          <default>10</default>
+          <constraints>
+            <minimum>2</minimum>
+            <step>1</step>
+            <maximum>60</maximum>
+          </constraints>
+          <control type="slider" format="integer">
+            <popup>false</popup>
+          </control>
+        </setting>
+      </group>
+    </category>
+    <category id="behavior" label="32010" help="">
+      <group id="1">
+        <setting id="toast_on_connect" type="boolean" label="32011" help="32061">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="backoff_cap" type="integer" label="32012" help="32062">
+          <level>2</level>
+          <default>60</default>
+          <constraints>
+            <minimum>10</minimum>
+            <step>10</step>
+            <maximum>600</maximum>
+          </constraints>
+          <control type="slider" format="integer">
+            <popup>false</popup>
+          </control>
+        </setting>
+        <setting id="debug" type="boolean" label="32013" help="32063">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle"/>
+        </setting>
+      </group>
+    </category>
+    <category id="pairing" label="32020" help="">
+      <group id="1">
+        <setting id="repair" type="action" label="32021" help="32071">
+          <level>0</level>
+          <data>RunScript(service.webostv,repair)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+      </group>
+    </category>
+  </section>
+</settings>

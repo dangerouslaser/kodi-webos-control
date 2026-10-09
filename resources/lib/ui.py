@@ -1,0 +1,157 @@
+"""Program UI: select dialogs that drive the service over IPC."""
+
+from __future__ import annotations
+
+from typing import Any
+
+import xbmcgui
+
+from . import ipc, lang
+
+ADDON_NAME = "LG webOS TV"
+
+SOUND_OUTPUTS = (
+    "tv_speaker",
+    "external_arc",
+    "external_optical",
+    "bt_soundbar",
+    "tv_external_speaker",
+    "tv_speaker_headphone",
+    "headphone",
+    "lineout",
+)
+
+# Shown in this order; the full list lives in aiowebostv/buttons.py.
+REMOTE_BUTTONS = (
+    "HOME", "BACK", "UP", "DOWN", "LEFT", "RIGHT", "ENTER", "EXIT",
+    "MENU", "QMENU", "INFO", "INPUT_HUB", "GUIDE",
+    "PLAY", "PAUSE", "STOP", "REWIND", "FASTFORWARD",
+    "VOLUMEUP", "VOLUMEDOWN", "MUTE", "CHANNELUP", "CHANNELDOWN",
+    "RED", "GREEN", "YELLOW", "BLUE", "ASPECT_RATIO", "CC", "POWER",
+)
+
+
+def _dialog() -> xbmcgui.Dialog:
+    return xbmcgui.Dialog()
+
+
+def _call(action: str, args: list[Any] | None = None) -> dict[str, Any] | None:
+    reply = ipc.call(action, args)
+    if reply.get("ok"):
+        return reply
+    message = reply.get("message") or lang.get(lang.ACTION_FAILED)
+    if reply.get("error") == "timeout":
+        message = lang.get(lang.NOT_RUNNING)
+    _dialog().notification(ADDON_NAME, message, xbmcgui.NOTIFICATION_ERROR)
+    return None
+
+
+def run() -> None:
+    menu = (
+        (lang.INPUTS, choose_input),
+        (lang.APPS, choose_app),
+        (lang.SOUND_OUTPUT, choose_sound_output),
+        (lang.BUTTONS, remote),
+        (lang.SEND_TOAST, send_toast),
+        (lang.STATUS, status),
+        (lang.REPAIR, repair),
+    )
+    while True:
+        index = _dialog().select(ADDON_NAME, [lang.get(label) for label, _ in menu])
+        if index < 0:
+            return
+        menu[index][1]()
+
+
+def _mark(label: str, current: bool) -> str:
+    return f"{label}  [{lang.get(lang.CURRENT)}]" if current else label
+
+
+def choose_input() -> None:
+    reply = _call("catalog")
+    if not reply:
+        return
+    catalog = reply["result"]
+    inputs = catalog.get("inputs", [])
+    labels = [_mark(i["label"], i["app_id"] == catalog.get("current_app")) for i in inputs]
+    index = _dialog().select(lang.get(lang.INPUTS), labels)
+    if index >= 0:
+        _call("input", [inputs[index]["id"]])
+
+
+def choose_app() -> None:
+    reply = _call("catalog")
+    if not reply:
+        return
+    catalog = reply["result"]
+    apps = catalog.get("apps", [])
+    labels = [_mark(a["title"], a["id"] == catalog.get("current_app")) for a in apps]
+    index = _dialog().select(lang.get(lang.APPS), labels)
+    if index >= 0:
+        _call("app", [apps[index]["id"]])
+
+
+def choose_sound_output() -> None:
+    reply = _call("catalog")
+    if not reply:
+        return
+    current = reply["result"].get("sound_output")
+    outputs = list(SOUND_OUTPUTS)
+    if current and current not in outputs:
+        outputs.insert(0, current)
+    labels = [_mark(o, o == current) for o in outputs]
+    index = _dialog().select(lang.get(lang.SOUND_OUTPUT), labels)
+    if index >= 0:
+        _call("sound_output", [outputs[index]])
+
+
+def remote() -> None:
+    last = 0
+    while True:
+        index = _dialog().select(lang.get(lang.BUTTONS), list(REMOTE_BUTTONS), preselect=last)
+        if index < 0:
+            return
+        last = index
+        if _call("button", [REMOTE_BUTTONS[index]]) is None:
+            return
+
+
+def send_toast() -> None:
+    message = _dialog().input(lang.get(lang.TOAST_PROMPT))
+    if message:
+        _call("toast", [message])
+
+
+def status() -> None:
+    reply = _call("status")
+    if reply:
+        show_status(reply["result"])
+
+
+def show_status(info: dict[str, Any]) -> None:
+    def yes_no(value: Any) -> str:
+        return "yes" if value else "no"
+
+    lines = [
+        f"Host: {info.get('host', '')}"
+        + (f" (configured {info['configured_host']})"
+           if info.get("configured_host") and info.get("configured_host") != info.get("host")
+           else ""),
+        f"Connected: {yes_no(info.get('connected'))}",
+        f"Paired: {yes_no(info.get('paired'))}"
+        + (" (blocked: use Re-pair)" if info.get("pairing_blocked") else ""),
+        f"Model: {info.get('model') or '-'}",
+        f"Firmware: {info.get('firmware') or '-'}",
+        f"Power: {info.get('power') or '-'}",
+        f"Volume: {info.get('volume') if info.get('volume') is not None else '-'}"
+        + (" (muted)" if info.get("muted") else ""),
+        f"App: {info.get('app') or '-'}",
+        f"Input: {info.get('input') or '-'}",
+        f"Sound output: {info.get('sound_output') or '-'}",
+    ]
+    _dialog().textviewer(lang.get(lang.STATUS), "\n".join(lines))
+
+
+def repair() -> None:
+    if _call("repair"):
+        _dialog().notification(ADDON_NAME, lang.get(lang.REPAIR_STARTED))

@@ -8,7 +8,6 @@ wss with a throwaway self-signed certificate.
 
 from __future__ import annotations
 
-import asyncio
 import contextlib
 import copy
 import json
@@ -241,10 +240,7 @@ class FakeTv:
         if key and key in self.valid_keys:
             await conn.send(json.dumps({"type": "registered", "id": uid, "payload": {"client-key": key}}))
             return
-        if key:
-            # Real TVs re-prompt for an unknown key; tests model "rejected".
-            await conn.send(json.dumps({"type": "error", "id": uid, "error": "403 bad client key", "payload": {}}))
-            return
+        # Unknown or missing key: real TVs show the PROMPT dialog again.
         self.prompts += 1
         await conn.send(json.dumps({"type": "response", "id": uid, "payload": {"pairingType": "PROMPT", "returnValue": True}}))
         if self.pairing == "accept":
