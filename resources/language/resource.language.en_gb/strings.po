@@ -245,3 +245,111 @@ msgstr ""
 msgctxt "#32118"
 msgid "No change"
 msgstr ""
+
+msgctxt "#32200"
+msgid "TV integration"
+msgstr ""
+
+msgctxt "#32201"
+msgid "Kodi's TV input"
+msgstr ""
+
+msgctxt "#32202"
+msgid "Choose Kodi's TV input..."
+msgstr ""
+
+msgctxt "#32203"
+msgid "When the TV turns off"
+msgstr ""
+
+msgctxt "#32204"
+msgid "When the TV switches away from Kodi"
+msgstr ""
+
+msgctxt "#32205"
+msgid "Resume when the TV switches back"
+msgstr ""
+
+msgctxt "#32206"
+msgid "Transparent control"
+msgstr ""
+
+msgctxt "#32210"
+msgid "Do nothing"
+msgstr ""
+
+msgctxt "#32211"
+msgid "Pause playback"
+msgstr ""
+
+msgctxt "#32212"
+msgid "Stop playback"
+msgstr ""
+
+msgctxt "#32213"
+msgid "Shut down (Kodi's power setting)"
+msgstr ""
+
+msgctxt "#32251"
+msgid "The TV input Kodi is plugged into, e.g. HDMI_1. Learned automatically the first time a video plays. Leave empty when Kodi runs on the TV itself."
+msgstr ""
+
+msgctxt "#32252"
+msgid "Pick Kodi's input from the TV's list."
+msgstr ""
+
+msgctxt "#32253"
+msgid "What Kodi does when the TV is turned off. Shut down waits 20 seconds and is cancelled if the TV comes back on; it runs the shutdown function set in Kodi's power saving settings."
+msgstr ""
+
+msgctxt "#32254"
+msgid "What Kodi does when the TV switches to another input or app while Kodi is playing."
+msgstr ""
+
+msgctxt "#32255"
+msgid "Resume playback that was paused here when the TV comes back to Kodi's input."
+msgstr ""
+
+msgctxt "#32256"
+msgid "While the TV shows another input or app, send Kodi remote presses to the TV instead (arrows, OK, back, volume, playback keys). Kodi's context menu key switches the TV back to Kodi. Off-TV setups only."
+msgstr ""
+
+msgctxt "#32300"
+msgid "LG TV"
+msgstr ""
+
+msgctxt "#32301"
+msgid "Play with Filmmaker Mode"
+msgstr ""
+
+msgctxt "#32302"
+msgid "Play in bright-room mode"
+msgstr ""
+
+msgctxt "#32303"
+msgid "Play with picture preset..."
+msgstr ""
+
+msgctxt "#32304"
+msgid "Play with the screen off"
+msgstr ""
+
+msgctxt "#32305"
+msgid "Play, then turn off the TV"
+msgstr ""
+
+msgctxt "#32306"
+msgid "Resume from %s"
+msgstr ""
+
+msgctxt "#32307"
+msgid "Play from beginning"
+msgstr ""
+
+msgctxt "#32308"
+msgid "Kodi's TV input"
+msgstr ""
+
+msgctxt "#32309"
+msgid "Automatic"
+msgstr ""

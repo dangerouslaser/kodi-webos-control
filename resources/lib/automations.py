@@ -3,6 +3,11 @@
 Runs on the service loop. The Kodi thread forwards player events with
 ``loop.call_soon_threadsafe(rules.av_started, hdr_type)`` / ``rules.stopped``.
 
+One-shot overrides ("Play with Filmmaker Mode" and friends in the context
+menu): ``arm()`` stores a request that the next playback session uses
+instead of the rules: a picture preset, screen off while playing, and/or
+turning the TV off when the video ends. Everything is undone on stop.
+
 Restore semantics: webOS keeps separate picture-mode memories for SDR and
 HDR signals. The preset to restore after playback is the one seen while
 Kodi was idle (the SDR GUI), not whatever the TV reported at the moment
@@ -16,6 +21,7 @@ import contextlib
 from typing import TYPE_CHECKING
 
 from . import kodilog as log
+from . import presets
 from .errors import ActionError
 
 if TYPE_CHECKING:
@@ -23,6 +29,11 @@ if TYPE_CHECKING:
     from .tv import TvController
 
 HDR_KINDS = ("sdr", "hdr10", "hlg", "dolbyvision")
+# An armed override expires if playback doesn't start within this time.
+ARM_TTL = 60.0
+# Wait this long after a video ends before turning the TV off, so the next
+# playlist item can start.
+END_SETTLE = 5.0
 
 
 def normalize_hdr_type(label: str) -> str | None:
@@ -47,6 +58,10 @@ class PlaybackRules:
         self.applied = False
         self._session = False
         self._pending: asyncio.Task | None = None
+        self._armed: tuple[dict, float] | None = None
+        self._override: dict | None = None
+        self._screen_off = False
+        self._ended = False
         controller.picture_listeners.append(self._on_picture)
 
     def update(self, settings: Settings) -> None:
@@ -66,22 +81,42 @@ class PlaybackRules:
         if not self._session:
             self.idle_mode = mode
 
-    def _schedule(self, coro_factory) -> None:
+    def _schedule(self, coro_factory, delay: float | None = None) -> None:
         if self._pending is not None and not self._pending.done():
             self._pending.cancel()
-        self._pending = asyncio.ensure_future(self._delayed(coro_factory))
+        self._pending = asyncio.ensure_future(self._delayed(coro_factory, delay))
 
-    async def _delayed(self, coro_factory) -> None:
-        await asyncio.sleep(max(0.0, self.settings.rules_debounce))
+    async def _delayed(self, coro_factory, delay: float | None) -> None:
+        await asyncio.sleep(max(0.0, self.settings.rules_debounce if delay is None else delay))
         await coro_factory()
+
+    def arm(self, override: dict) -> dict:
+        """Use this override for the next playback session.
+
+        Keys: "picture" (intent or preset name, "" = rules as usual),
+        "screen_off" (bool), "power_off_at_end" (bool).
+        """
+        loop = asyncio.get_running_loop()
+        self._armed = (dict(override), loop.time() + ARM_TTL)
+        log.info(f"next playback: {override}")
+        return {"armed": override}
+
+    def _take_armed(self) -> dict | None:
+        armed, self._armed = self._armed, None
+        if armed is None or asyncio.get_running_loop().time() > armed[1]:
+            return None
+        return armed[0]
 
     # events (loop thread) -------------------------------------------------
 
     def av_started(self, hdr_label: str) -> None:
+        if not self._session:
+            self._override = self._take_armed()
         self._session = True
+        self._ended = False
         kind = normalize_hdr_type(hdr_label)
         log.debug(f"video started, HdrType={hdr_label!r} -> {kind}")
-        if kind is None:
+        if kind is None and not self._override:
             log.info(f"unknown HdrType {hdr_label!r}; no picture rule applied")
             self._schedule(_noop)
             return
@@ -91,41 +126,85 @@ class PlaybackRules:
         if not self._session:
             return
         log.debug("playback stopped")
+        self._ended = False
         self._schedule(self._restore)
+
+    def ended(self) -> None:
+        """Playback reached the end (not stopped by the user)."""
+        if not self._session:
+            return
+        log.debug("playback ended")
+        self._ended = True
+        delay = None
+        if self._override and self._override.get("power_off_at_end"):
+            delay = max(END_SETTLE, self.settings.rules_debounce)
+        self._schedule(self._restore, delay)
 
     # actions --------------------------------------------------------------
 
-    async def _apply(self, kind: str) -> None:
-        if not self.settings.rules_enabled:
+    async def _target(self, kind: str | None) -> str:
+        override = self._override or {}
+        choice = override.get("picture") or ""
+        if choice:
+            try:
+                modes = await self.controller.picture_modes()
+            except ActionError:
+                modes = []
+            target = presets.resolve(presets.candidates(choice), kind, modes)
+            if target is None:
+                log.warning(f"no {choice!r} preset for {kind or 'this'} signal")
+            return target or ""
+        if not self.settings.rules_enabled or kind is None:
+            return ""
+        return self.presets().get(kind, "")
+
+    async def _apply(self, kind: str | None) -> None:
+        if not self.controller.connected:
             return
-        target = self.presets().get(kind, "")
-        if not target or not self.controller.connected:
-            return
-        if self.controller.picture_preset == target:
-            return
-        try:
-            await self.controller.set_picture_mode(target)
-        except ActionError as err:
-            log.warning(f"{kind} rule: cannot set preset {target!r}: {err.message}")
-            return
-        self.applied = True
-        log.info(f"{kind} playback: picture preset {target}")
+        target = await self._target(kind)
+        if target and self.controller.picture_preset != target:
+            try:
+                await self.controller.set_picture_mode(target)
+            except ActionError as err:
+                log.warning(f"{kind} playback: cannot set preset {target!r}: {err.message}")
+            else:
+                self.applied = True
+                log.info(f"{kind} playback: picture preset {target}")
+        if (self._override or {}).get("screen_off") and not self._screen_off:
+            try:
+                await self.controller.screen(False)
+                self._screen_off = True
+                log.info("screen off for this playback")
+            except ActionError as err:
+                log.warning(f"cannot turn the screen off: {err.message}")
 
     async def _restore(self) -> None:
+        override, self._override = self._override, None
+        ended, self._ended = self._ended, False
         try:
-            if not (self.settings.rules_enabled and self.settings.restore_on_stop and self.applied):
-                return
+            restore = self.applied and (
+                bool(override) or (self.settings.rules_enabled and self.settings.restore_on_stop)
+            )
             target = self.idle_mode
-            if not target or not self.controller.connected:
-                return
-            if self.controller.picture_preset != target:
+            if restore and target and self.controller.connected:
+                if self.controller.picture_preset != target:
+                    try:
+                        await self.controller.set_picture_mode(target)
+                        log.info(f"playback ended: restored picture preset {target}")
+                    except ActionError as err:
+                        log.warning(f"cannot restore preset {target!r}: {err.message}")
+            if self._screen_off and self.controller.connected:
+                with contextlib.suppress(ActionError):
+                    await self.controller.screen(True)
+            if override and override.get("power_off_at_end") and ended:
+                log.info("video finished; turning the TV off")
                 try:
-                    await self.controller.set_picture_mode(target)
-                    log.info(f"playback ended: restored picture preset {target}")
+                    await self.controller.power_off()
                 except ActionError as err:
-                    log.warning(f"cannot restore preset {target!r}: {err.message}")
+                    log.warning(f"cannot turn the TV off: {err.message}")
         finally:
             self.applied = False
+            self._screen_off = False
             self._session = False
 
     async def close(self) -> None:

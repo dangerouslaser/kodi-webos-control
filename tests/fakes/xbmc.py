@@ -13,6 +13,7 @@ logs: list[tuple[int, str]] = []
 jsonrpc_calls: list[dict[str, Any]] = []
 info_labels: dict[str, str] = {}
 builtins: list[str] = []
+conditions: dict[str, bool] = {}
 _monitors: list[Monitor] = []
 _abort = threading.Event()
 
@@ -22,6 +23,7 @@ def _reset() -> None:
     jsonrpc_calls.clear()
     info_labels.clear()
     builtins.clear()
+    conditions.clear()
     _monitors.clear()
     _abort.clear()
 
@@ -49,8 +51,8 @@ def getInfoLabel(label: str) -> str:  # noqa: N802
     return info_labels.get(label, "")
 
 
-def getCondVisibility(_condition: str) -> bool:  # noqa: N802
-    return False
+def getCondVisibility(condition: str) -> bool:  # noqa: N802
+    return conditions.get(condition, False)
 
 
 def _request_abort() -> None:

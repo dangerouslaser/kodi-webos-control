@@ -56,10 +56,45 @@ class _Player(xbmc.Player):
         self._service.player_event("stopped")
 
     def onPlayBackEnded(self) -> None:  # noqa: N802
-        self._service.player_event("stopped")
+        self._service.player_event("ended")
 
     def onPlayBackError(self) -> None:  # noqa: N802
         self._service.player_event("stopped")
+
+
+class _KodiSide:
+    """What the TV watcher may do to Kodi (called from the loop thread)."""
+
+    def __init__(self, service: WebOsService) -> None:
+        self._service = service
+
+    def is_playing(self) -> bool:
+        return xbmc.getCondVisibility("Player.Playing")
+
+    def is_paused(self) -> bool:
+        return xbmc.getCondVisibility("Player.Paused")
+
+    def pause(self) -> None:
+        if self.is_playing():
+            xbmc.executebuiltin("PlayerControl(Play)")  # toggles
+
+    def resume(self) -> None:
+        if self.is_paused():
+            xbmc.executebuiltin("PlayerControl(Play)")
+
+    def stop(self) -> None:
+        xbmc.executebuiltin("PlayerControl(Stop)")
+
+    def shutdown(self) -> None:
+        # Kodi's own shutdown function (Settings > System > Power saving).
+        xbmc.executebuiltin("ShutDown()")
+
+    def set_overlay(self, active: bool) -> None:
+        if self._service.overlay is not None:
+            self._service.overlay.set_active(active)
+
+    def save_setting(self, key: str, value: str) -> None:
+        xbmcaddon.Addon(ADDON_ID).setSetting(key, value)
 
 
 class WebOsService:
@@ -72,6 +107,8 @@ class WebOsService:
         self.monitor: _Monitor | None = None
         self.player: _Player | None = None
         self.rules: Any = None
+        self.watcher: Any = None
+        self.overlay: Any = None
 
     # entry ---------------------------------------------------------------
 
@@ -96,10 +133,13 @@ class WebOsService:
 
         # Lazy imports: only pay for aiowebostv/websockets once we know we run.
         from .automations import PlaybackRules  # noqa: PLC0415
+        from .remote import Overlay  # noqa: PLC0415
         from .state import PropertyPublisher  # noqa: PLC0415
         from .tv import TvController  # noqa: PLC0415
+        from .watcher import TvWatcher  # noqa: PLC0415
 
         self.publisher = PropertyPublisher()
+        self.overlay = Overlay(self.forward, lambda: self.settings.kodi_input)
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._loop_main, name="webostv-loop", daemon=True)
         self.thread.start()
@@ -116,6 +156,7 @@ class WebOsService:
             )
             await self.controller.start()
             self.rules = PlaybackRules(self.controller, self.settings)
+            self.watcher = TvWatcher(self.controller, self.settings, _KodiSide(self))
 
         self._submit(create()).result(timeout=5)
         self.monitor = _Monitor(self)
@@ -136,11 +177,15 @@ class WebOsService:
         log.info("service stopping")
         if self.loop is None:
             return
-        if self.rules is not None:
+        for part in (self.watcher, self.rules):
+            if part is None:
+                continue
             try:
-                self._submit(self.rules.close()).result(timeout=SHUTDOWN_TIMEOUT)
+                self._submit(part.close()).result(timeout=SHUTDOWN_TIMEOUT)
             except Exception:  # noqa: BLE001
                 pass
+        if self.overlay is not None:
+            self.overlay.close()
         if self.controller is not None:
             try:
                 self._submit(self.controller.stop()).result(timeout=SHUTDOWN_TIMEOUT)
@@ -167,8 +212,10 @@ class WebOsService:
         if settings == self.settings:
             return
         self.settings = settings
-        if self.rules is not None and self.loop is not None:
-            self.loop.call_soon_threadsafe(self.rules.update, settings)
+        if self.loop is not None:
+            for part in (self.rules, self.watcher):
+                if part is not None:
+                    self.loop.call_soon_threadsafe(part.update, settings)
         if self.controller is not None:
             self._submit(self.controller.reconfigure(settings))
 
@@ -176,6 +223,22 @@ class WebOsService:
         if self.loop is None or self.rules is None:
             return
         self.loop.call_soon_threadsafe(getattr(self.rules, event), *args)
+        if event == "av_started" and self.watcher is not None:
+            self.loop.call_soon_threadsafe(self.watcher.video_started)
+
+    def forward(self, name: str, args: list[Any]) -> None:
+        """Run an action for transparent control; no reply, errors logged."""
+        if self.loop is None or self.controller is None:
+            return
+        from . import actions  # noqa: PLC0415
+
+        async def run() -> None:
+            try:
+                await actions.dispatch(self.controller, name, args)
+            except ActionError as err:
+                log.debug(f"forwarded {name} failed: {err.message}")
+
+        self._submit(run())
 
     def handle_request(self, request: dict[str, Any]) -> Future | None:
         if self.loop is None or self.controller is None:
@@ -194,7 +257,7 @@ class WebOsService:
             args = [args]
         log.debug(f"request {name} {args}")
         try:
-            result = await actions.dispatch(self.controller, name, args)
+            result = await actions.dispatch(self.controller, name, args, rules=self.rules)
             reply = ipc.reply_ok(request_id, result)
         except ActionError as err:
             level = log.info if isinstance(err, BadRequest) else log.warning

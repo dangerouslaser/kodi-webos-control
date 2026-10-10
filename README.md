@@ -16,7 +16,8 @@ See [`spec.md`](spec.md) for the full design.
 | 3. Actions + IPC | Done: action registry, `RunScript` argv parsing, NotifyAll request/reply, example keymap |
 | 4. UI + settings | Done: program UI, settings v2, Re-pair, debug logging, strings.po |
 | 5. On-device validation | Off-TV mode done (see below); on-TV mode not yet tested |
-| 6. Phase 2 (picture presets, HDR rules) | Built: `picture_preset` action, live `WebOS.PicturePreset`, HDR playback rules. The alert-to-luna workaround is confirmed working on webOS 10.3; the rules haven't yet run on hardware |
+| 6. Phase 2 (picture presets, HDR rules) | Done: `picture_preset` action, live `WebOS.PicturePreset`, HDR playback rules, preset pickers. Confirmed on webOS 10.3 |
+| 7. TV integration (0.4.0) | Built: TV-off and switch-away reactions, transparent control, video context menu. Not yet run on hardware |
 
 ### On-device results
 
@@ -79,6 +80,7 @@ Every action works the same from `RunScript`, keymaps, skin buttons, and JSON-RP
 | `media` | `play`, `pause`, `stop`, `rewind`, `fast_forward` | `RunScript(service.webostv,media,pause)` |
 | `channel` | `up`, `down`, or channel id | `RunScript(service.webostv,channel,up)` |
 | `picture_preset` | preset name, e.g. `filmMaker`, `cinema` | `RunScript(service.webostv,picture_preset,cinema)` |
+| `next_playback` | `picture=<filmmaker\|bright\|preset>`, `screen_off`, `power_off_at_end` | `RunScript(service.webostv,next_playback,picture=filmmaker)` |
 | `command` | SSAP uri, optional JSON payload | `RunScript(service.webostv,command,ssap://system/getSystemInfo)` |
 | `status` | none | Shows connection, model, firmware |
 | `repair` | none | Forgets the key and re-prompts on the TV |
@@ -119,6 +121,40 @@ and applies the matching preset after a short delay (default 1.5 s), so a quick 
 doesn't make the TV flip back and forth. When playback stops it restores the preset that was in use while
 Kodi was idle. The TV keeps separate picture memories for SDR and HDR signals, so the
 mode it reports at the instant playback starts isn't a safe restore target.
+
+## TV integration
+
+*Settings → TV integration*:
+
+- **Kodi's TV input**: the input Kodi's box is plugged into (e.g. `HDMI_1`). Learned the first time
+  a video plays; *Choose…* picks it from the TV's list. Not needed when Kodi runs on the TV.
+- **When the TV turns off**: do nothing, pause, stop, or shut down. Shut down runs Kodi's own
+  shutdown function (*Settings → System → Power saving*) after 20 s, and is cancelled if the TV
+  comes back on. A dropped connection counts as "off" after 15 s.
+- **When the TV switches away from Kodi**: do nothing, pause, or stop, when the TV moves to another
+  input or app (after a 1 s settle, so passing through doesn't count). *Resume when the TV switches
+  back* resumes only playback this paused.
+- **Transparent control**: while the TV shows another input or app, an invisible Kodi dialog catches
+  Kodi remote presses and sends them to the TV: arrows, OK, back, info, numbers, colour keys,
+  playback keys, channel up/down, volume and mute. Kodi's context-menu key switches the TV back to
+  Kodi (and closes the dialog). Off-TV only: Kodi on the TV gets no key presses in the background.
+
+### Video context menu
+
+*LG TV* submenu on movies, episodes, music videos and video files (when the TV is connected):
+
+| Item | Does |
+| --- | --- |
+| Play with Filmmaker Mode | Filmmaker Mode for the video's signal (`filmMaker` / `hdrFilmMaker`; Dolby Vision falls back to Cinema) |
+| Play in bright-room mode | Expert (Bright room) for SDR, Cinema Home for HDR / Dolby Vision |
+| Play with picture preset… | Any preset the TV offers for this video's HDR type |
+| Play with the screen off | Screen off while it plays (concerts, podcasts); back on when it stops |
+| Play, then turn off the TV | Turns the TV off when the video (or playlist) finishes; not when you stop it |
+
+Each item applies only to the playback it starts (60 s to begin), and is undone when playback stops.
+They work even with the HDR rules off. Combined with *When the TV turns off: Shut down*, "Play,
+then turn off the TV" also powers down the Kodi box. The same overrides are available to keymaps
+and scripts as `next_playback`.
 
 ## Skin properties
 

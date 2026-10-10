@@ -19,6 +19,11 @@ _DEFAULTS = {
     "preset_dv": "",
     "restore_on_stop": "true",
     "rules_debounce": "1.5",
+    "kodi_input": "",
+    "on_tv_off": "0",
+    "on_switch_away": "0",
+    "resume_on_return": "true",
+    "transparent_control": "false",
 }
 
 

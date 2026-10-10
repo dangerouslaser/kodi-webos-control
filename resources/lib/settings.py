@@ -7,6 +7,17 @@ from dataclasses import dataclass
 import xbmcaddon
 
 ADDON_ID = "service.webostv"
+# Spinner settings store an index into these.
+TV_OFF_ACTIONS = ("none", "pause", "stop", "shutdown")
+SWITCH_AWAY_ACTIONS = ("none", "pause", "stop")
+
+
+def _option(addon: xbmcaddon.Addon, key: str, options: tuple[str, ...]) -> str:
+    try:
+        index = int(addon.getSetting(key) or 0)
+    except ValueError:
+        index = 0
+    return options[index] if 0 <= index < len(options) else options[0]
 
 
 @dataclass(frozen=True)
@@ -27,6 +38,12 @@ class Settings:
     preset_dv: str = ""
     restore_on_stop: bool = True
     rules_debounce: float = 1.5
+    # TV integration
+    kodi_input: str = ""
+    on_tv_off: str = "none"
+    on_switch_away: str = "none"
+    resume_on_return: bool = True
+    transparent_control: bool = False
 
     @classmethod
     def load(cls, addon: xbmcaddon.Addon | None = None) -> Settings:
@@ -55,6 +72,11 @@ class Settings:
             preset_dv=addon.getSetting("preset_dv").strip(),
             restore_on_stop=addon.getSettingBool("restore_on_stop"),
             rules_debounce=number("rules_debounce", 1.5),
+            kodi_input=addon.getSetting("kodi_input").strip(),
+            on_tv_off=_option(addon, "on_tv_off", TV_OFF_ACTIONS),
+            on_switch_away=_option(addon, "on_switch_away", SWITCH_AWAY_ACTIONS),
+            resume_on_return=addon.getSettingBool("resume_on_return"),
+            transparent_control=addon.getSettingBool("transparent_control"),
         )
 
     @property

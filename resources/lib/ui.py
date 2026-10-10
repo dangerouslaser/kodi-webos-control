@@ -151,6 +151,24 @@ def choose_rule_preset(kind: str) -> None:
     xbmc.executebuiltin("Addon.OpenSettings(service.webostv)")
 
 
+def choose_kodi_input() -> None:
+    """Settings button: which TV input Kodi's box is plugged into."""
+    reply = _call("catalog")
+    addon = xbmcaddon.Addon("service.webostv")
+    if reply:
+        current = addon.getSetting("kodi_input")
+        inputs = reply["result"].get("inputs", [])
+        options = [""] + [i["id"] for i in inputs]
+        labels = [_mark(lang.get(lang.AUTOMATIC), current == "")] + [
+            _mark(f"{i['label']} ({i['id']})" if i["label"] != i["id"] else i["id"], i["id"] == current)
+            for i in inputs
+        ]
+        index = _dialog().select(lang.get(lang.KODI_INPUT), labels)
+        if index >= 0:
+            addon.setSetting("kodi_input", options[index])
+    xbmc.executebuiltin("Addon.OpenSettings(service.webostv)")
+
+
 def remote() -> None:
     last = 0
     while True:

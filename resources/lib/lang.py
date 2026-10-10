@@ -25,6 +25,10 @@ NO_TVS_FOUND = 32115
 TV_SELECTED = 32116
 PICTURE_PRESET = 32117
 NO_CHANGE = 32118
+RESUME_FROM = 32306
+FROM_START = 32307
+KODI_INPUT = 32308
+AUTOMATIC = 32309
 
 _FALLBACK = {
     INPUTS: "Inputs",
@@ -46,6 +50,10 @@ _FALLBACK = {
     TV_SELECTED: "TV selected",
     PICTURE_PRESET: "Picture preset",
     NO_CHANGE: "No change",
+    RESUME_FROM: "Resume from %s",
+    FROM_START: "Play from beginning",
+    KODI_INPUT: "Kodi's TV input",
+    AUTOMATIC: "Automatic",
 }
 
 

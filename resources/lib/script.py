@@ -22,6 +22,8 @@ def main(argv: list[str]) -> None:
         name = args[0].strip().lower() if args else "ui"
         if name == "find_tv":
             ui.find_tv()
+        elif name == "choose_kodi_input":
+            ui.choose_kodi_input()
         elif name == "choose_preset":
             ui.choose_rule_preset(args[1] if len(args) > 1 else "")
         else:

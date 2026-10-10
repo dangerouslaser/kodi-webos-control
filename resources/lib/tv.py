@@ -91,6 +91,8 @@ class TvController:
         self.picture_preset = ""
         # Callbacks run with the new preset name (automations track it).
         self.picture_listeners: list[Callable[[str], None]] = []
+        # Callbacks run with every new TvState (the TV watcher uses them).
+        self.state_listeners: list[Callable[[TvState], None]] = []
 
     # lifecycle -----------------------------------------------------------
 
@@ -434,6 +436,11 @@ class TvController:
             self._on_state(snapshot)
         except Exception as err:  # noqa: BLE001
             log.error(f"state publish failed: {err!r}")
+        for listener in list(self.state_listeners):
+            try:
+                listener(snapshot)
+            except Exception as err:  # noqa: BLE001
+                log.warning(f"state listener failed: {err!r}")
 
     # commands ------------------------------------------------------------
 

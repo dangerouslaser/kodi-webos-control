@@ -48,6 +48,7 @@ def wait_until(predicate, timeout=5.0):
 def running(patch_ports):
     xbmcaddon.settings["loopback_fallback"] = "false"
     tvt = TvThread()
+    tvt.tv.runner = tvt  # tests drive the fake TV through its loop thread
     patch_ports(tvt.tv)
     service = WebOsService()
     assert service.start()
@@ -147,6 +148,7 @@ def test_python_too_old_disables_cleanly(monkeypatch):
 def test_shutdown_is_fast(patch_ports):
     xbmcaddon.settings["loopback_fallback"] = "false"
     tvt = TvThread()
+    tvt.tv.runner = tvt  # tests drive the fake TV through its loop thread
     patch_ports(tvt.tv)
     service = WebOsService()
     service.start()
@@ -253,3 +255,95 @@ def test_menu_picture_preset_lists_current_signal_presets(running):
     assert "Filmmaker Mode  [current]" in labels_holder["labels"]
     assert not any("(HDR)" in label for label in labels_holder["labels"])
     wait_until(lambda: tv.model.picture_mode == "cinema")
+
+
+class FakeTag:
+    def __init__(self, dbid, mediatype, resume):
+        self._v = (dbid, mediatype, resume)
+
+    def getDbId(self):  # noqa: N802
+        return self._v[0]
+
+    def getMediaType(self):  # noqa: N802
+        return self._v[1]
+
+    def getResumeTime(self):  # noqa: N802
+        return self._v[2]
+
+
+class FakeListItem:
+    def __init__(self, dbid=7, mediatype="movie", resume=0.0, path="/films/x.mkv"):
+        self._tag = FakeTag(dbid, mediatype, resume)
+        self._path = path
+
+    def getVideoInfoTag(self):  # noqa: N802
+        return self._tag
+
+    def getPath(self):  # noqa: N802
+        return self._path
+
+
+def player_opens():
+    return [c for c in xbmc.jsonrpc_calls if c.get("method") == "Player.Open"]
+
+
+def test_context_play_with_filmmaker(running):
+    service, tv = running
+    from resources.lib import context
+
+    context.main(["context.py", "filmmaker"], FakeListItem())
+    assert player_opens()[-1]["params"] == {"item": {"movieid": 7}, "options": {"resume": False}}
+    # Kodi starts the HDR10 movie: Filmmaker Mode for HDR, restored after.
+    xbmc.info_labels.update({"_playing_video": "1", "VideoPlayer.HdrType": "hdr10"})
+    service.player.onAVStarted()
+    wait_until(lambda: tv.model.picture_mode == "hdrFilmMaker")
+    service.player.onPlayBackStopped()
+    wait_until(lambda: tv.model.picture_mode == "filmMaker")
+
+
+def test_context_resume_prompt_and_plain_file(running):
+    from resources.lib import context
+
+    xbmcgui.select_answers.append(0)  # "Resume from 0:42:05"
+    context.main(["context.py", "screen_off"], FakeListItem(dbid=-1, mediatype="", resume=2525))
+    assert xbmcgui.contextmenus[-1] == ["Resume from 0:42:05", "Play from beginning"]
+    assert player_opens()[-1]["params"] == {"item": {"file": "/films/x.mkv"},
+                                            "options": {"resume": True}}
+    # Cancelling the resume prompt plays nothing.
+    count = len(player_opens())
+    context.main(["context.py", "sleep"], FakeListItem(resume=60))
+    assert len(player_opens()) == count
+
+
+def test_context_preset_list_matches_item_hdr_type(running):
+    from resources.lib import context
+
+    xbmc.info_labels.update({"ListItem.HdrType": "dolbyvision", "ListItem.VideoResolution": "2160"})
+    xbmcgui.select_answers.append(0)
+    context.main(["context.py", "preset"], FakeListItem())
+    assert xbmcgui.selects[-1][1] == ["Cinema (Dolby Vision)"]
+    assert player_opens()
+
+
+def test_transparent_control_end_to_end(running):
+    service, tv = running
+    xbmcaddon.settings.update({"transparent_control": "true", "kodi_input": "org.xbmc.kodi"})
+    service.reload_settings()
+    tv.runner.run(tv.set_app("netflix"))
+    wait_until(lambda: xbmcgui.modal_windows)
+    window = xbmcgui.modal_windows[0]
+    window.press(3)  # Kodi "up"
+    wait_until(lambda: tv.buttons == ["UP"])
+    window.press(88)  # Kodi volume up -> TV volume
+    wait_until(lambda: tv.model.volume == 11)
+    tv.runner.run(tv.set_app("org.xbmc.kodi"))
+    wait_until(lambda: not xbmcgui.modal_windows)
+
+
+def test_tv_off_runs_kodi_action(running):
+    service, tv = running
+    xbmcaddon.settings.update({"on_tv_off": "2"})  # stop
+    service.reload_settings()
+    xbmc.conditions["Player.Playing"] = True
+    tv.runner.run(tv.set_power("Active Standby"))
+    wait_until(lambda: "PlayerControl(Stop)" in xbmc.builtins)

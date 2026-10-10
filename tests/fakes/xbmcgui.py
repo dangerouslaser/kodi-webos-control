@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from typing import Any
 
 NOTIFICATION_INFO = "info"
@@ -15,6 +16,8 @@ input_answers: list[str] = []
 selects: list[tuple[str, list[str]]] = []
 textviewers: list[tuple[str, str]] = []
 writes: list[tuple[str, str]] = []
+contextmenus: list[list[str]] = []
+modal_windows: list[WindowDialog] = []
 
 
 def _reset() -> None:
@@ -25,6 +28,10 @@ def _reset() -> None:
     selects.clear()
     textviewers.clear()
     writes.clear()
+    contextmenus.clear()
+    for window in list(modal_windows):
+        window.close()
+    modal_windows.clear()
 
 
 class Window:
@@ -43,6 +50,38 @@ class Window:
         self._props.pop(key.lower(), None)
 
 
+class Action:
+    def __init__(self, action_id: int) -> None:
+        self._id = action_id
+
+    def getId(self) -> int:  # noqa: N802
+        return self._id
+
+
+class WindowDialog:
+    """doModal blocks until close(); tests send actions with press()."""
+
+    def __init__(self) -> None:
+        self._closed = threading.Event()
+        self.shown = threading.Event()
+
+    def doModal(self) -> None:  # noqa: N802
+        modal_windows.append(self)
+        self.shown.set()
+        self._closed.wait(10)
+
+    def close(self) -> None:
+        self._closed.set()
+        if self in modal_windows:
+            modal_windows.remove(self)
+
+    def onAction(self, action: Action) -> None:  # noqa: N802
+        pass
+
+    def press(self, action_id: int) -> None:
+        self.onAction(Action(action_id))
+
+
 class Dialog:
     def notification(self, heading: str, message: str, icon: Any = NOTIFICATION_INFO,
                      time: int = 5000, sound: bool = True) -> None:  # noqa: A002
@@ -57,6 +96,10 @@ class Dialog:
 
     def textviewer(self, heading: str, text: str, *_a: Any, **_k: Any) -> None:
         textviewers.append((heading, text))
+
+    def contextmenu(self, items: list[str]) -> int:
+        contextmenus.append([str(i) for i in items])
+        return select_answers.pop(0) if select_answers else -1
 
     def ok(self, heading: str, message: str) -> bool:
         textviewers.append((heading, message))

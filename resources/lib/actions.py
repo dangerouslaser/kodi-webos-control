@@ -19,6 +19,9 @@ if TYPE_CHECKING:
 
 Parser = Callable[[list[Any]], dict[str, Any]]
 Handler = Callable[["TvController", dict[str, Any]], Awaitable[Any]]
+# Handlers for actions that configure the service rather than the TV get
+# the PlaybackRules object instead of the controller.
+RulesHandler = Callable[[Any, dict[str, Any]], Any]
 
 
 @dataclass(frozen=True)
@@ -29,6 +32,8 @@ class Action:
     # True when the caller needs data back (UI lists, command results).
     returns_data: bool = False
     usage: str = ""
+    # True: run(rules, kwargs) on the service's PlaybackRules, not the TV.
+    on_rules: bool = False
 
 
 def _text(args: list[Any]) -> str:
@@ -123,6 +128,31 @@ def _parse_channel(args: list[Any]) -> dict[str, Any]:
     return {"value": value.lower() if value.lower() in ("up", "down") else value}
 
 
+NEXT_PLAYBACK_FLAGS = ("screen_off", "power_off_at_end")
+
+
+def _parse_next_playback(args: list[Any]) -> dict[str, Any]:
+    """picture=<intent or preset>, screen_off, power_off_at_end (any order)."""
+    if len(args) == 1 and isinstance(args[0], dict):
+        raw = args[0]
+    else:
+        raw = {}
+        for arg in args:
+            key, sep, value = str(arg).strip().partition("=")
+            raw[key.strip().lower()] = value.strip() if sep else True
+    override = {"picture": "", "screen_off": False, "power_off_at_end": False}
+    for key, value in raw.items():
+        if key == "picture":
+            override["picture"] = str(value or "").strip()
+        elif key in NEXT_PLAYBACK_FLAGS:
+            override[key] = value is True or str(value).lower() in ("1", "true", "yes", "on")
+        else:
+            raise BadRequest(f"unknown option {key!r}")
+    if not any(override.values()):
+        raise BadRequest("nothing to do")
+    return {"override": override}
+
+
 async def _status(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any]:
     status = tv.status()
     if tv.connected and not status["firmware"]:
@@ -175,11 +205,14 @@ ACTIONS: dict[str, Action] = {
         Action("status", _no_args, _status, returns_data=True),
         Action("catalog", _no_args, _catalog, returns_data=True),
         Action("picture_modes", _no_args, _picture_modes, returns_data=True),
+        Action("next_playback", _parse_next_playback,
+               lambda rules, kw: rules.arm(kw["override"]), on_rules=True,
+               usage="picture=<filmmaker|bright|preset>[,screen_off][,power_off_at_end]"),
     )
 }
 
 # Handled by default.py itself, never sent to the service.
-LOCAL_ACTIONS = {"ui", "find_tv", "choose_preset"}
+LOCAL_ACTIONS = {"ui", "find_tv", "choose_preset", "choose_kodi_input"}
 
 
 def parse(name: str, args: list[Any]) -> tuple[Action, dict[str, Any]]:
@@ -195,6 +228,10 @@ def parse(name: str, args: list[Any]) -> tuple[Action, dict[str, Any]]:
     return action, kwargs
 
 
-async def dispatch(tv: TvController, name: str, args: list[Any]) -> Any:
+async def dispatch(tv: TvController, name: str, args: list[Any], rules: Any = None) -> Any:
     action, kwargs = parse(name, args)
+    if action.on_rules:
+        if rules is None:
+            raise BadRequest(f"{action.name} is not available")
+        return action.run(rules, kwargs)
     return await action.run(tv, kwargs)
