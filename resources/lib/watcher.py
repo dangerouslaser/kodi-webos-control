@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 from typing import TYPE_CHECKING, Protocol
 
 from . import kodilog as log
@@ -86,6 +87,8 @@ class TvWatcher:
 
     def update(self, settings: Settings) -> None:
         self.settings = settings
+        # Kodi's input may have changed: re-evaluate what's on screen.
+        self._on_state(self.controller.state)
         self._update_overlay()
 
     # state ----------------------------------------------------------------
@@ -183,13 +186,33 @@ class TvWatcher:
 
     def video_started(self) -> None:
         """Learn Kodi's input the first time a video plays (off-TV mode)."""
+        self.learn_input("video started")
+
+    def learn_input(self, reason: str) -> None:
+        """If Kodi's input isn't set, take the TV's current input.
+
+        Called when Kodi must be on screen: a video just started, or the
+        user just changed settings in Kodi's UI.
+        """
         if self.settings.kodi_input or self.settings.is_loopback:
             return
         state = self.controller.state
         if not (state.connected and state.is_on and state.input_id):
             return
-        log.info(f"learned Kodi's TV input: {state.input_id} ({state.input_label})")
+        log.info(f"learned Kodi's TV input ({reason}): {state.input_id} ({state.input_label})")
+        self.settings = dataclasses.replace(self.settings, kodi_input=state.input_id)
         self.kodi.save_setting("kodi_input", state.input_id)
+        self._on_state(state)
+
+    def status(self) -> dict:
+        return {
+            "kodi_input": self.settings.kodi_input,
+            "kodi_on_screen": self._foreground,
+            "transparent_control": self.settings.transparent_control,
+            "transparent_active": self._overlay,
+            "on_tv_off": self.settings.on_tv_off,
+            "on_switch_away": self.settings.on_switch_away,
+        }
 
     async def close(self) -> None:
         for task in (self._off_task, self._shutdown_task, self._fg_task):

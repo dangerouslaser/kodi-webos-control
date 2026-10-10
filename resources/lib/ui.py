@@ -213,6 +213,11 @@ def show_status(info: dict[str, Any]) -> None:
         f"Input: {info.get('input') or '-'}",
         f"Sound output: {info.get('sound_output') or '-'}",
         f"Picture preset: {info.get('picture_preset') or '-'}",
+        f"Kodi's TV input: {info.get('kodi_input') or 'not set'}"
+        + {True: " (on screen)", False: " (not on screen)"}.get(info.get("kodi_on_screen"), ""),
+        "Transparent control: "
+        + ("active" if info.get("transparent_active")
+           else "on, waiting" if info.get("transparent_control") else "off"),
     ]
     _dialog().textviewer(lang.get(lang.STATUS), "\n".join(lines))
 

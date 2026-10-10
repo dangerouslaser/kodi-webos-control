@@ -126,8 +126,10 @@ mode it reports at the instant playback starts isn't a safe restore target.
 
 *Settings → TV integration*:
 
-- **Kodi's TV input**: the input Kodi's box is plugged into (e.g. `HDMI_1`). Learned the first time
-  a video plays; *Choose…* picks it from the TV's list. Not needed when Kodi runs on the TV.
+- **Kodi's TV input**: the input Kodi's box is plugged into (e.g. `HDMI_1`). Learned automatically
+  when you change any addon setting (the TV must be showing Kodi then) or when a video plays;
+  *Choose…* picks it from the TV's list. Not needed when Kodi runs on the TV. *Status* shows the
+  learned input and whether transparent control is active.
 - **When the TV turns off**: do nothing, pause, stop, or shut down. Shut down runs Kodi's own
   shutdown function (*Settings → System → Power saving*) after 20 s, and is cancelled if the TV
   comes back on. A dropped connection counts as "off" after 15 s.

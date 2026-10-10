@@ -388,3 +388,37 @@ async def test_armed_override_expires(tv, controller, monkeypatch):
     await asyncio.sleep(0.2)
     assert tv.model.power == "Active"
     await rules.close()
+
+
+async def test_learns_input_then_transparent_control_starts(tv, controller, kodi):
+    """Enabling the setting in Kodi's UI (TV on Kodi) learns the input."""
+    off_tv = dataclasses.replace(BASE, host="192.0.2.5", transparent_control=True)
+    controller.settings = dataclasses.replace(controller.settings, host="192.0.2.5")
+    await tv.set_app("com.webos.app.hdmi1")
+    await wait_for(lambda: controller.state.input_id == "HDMI_1")
+    w = watcher.TvWatcher(controller, off_tv, kodi)
+    w.update(off_tv)
+    assert w.status()["kodi_on_screen"] is None  # input unknown: nothing happens
+    w.learn_input("settings changed")
+    assert kodi.saved == {"kodi_input": "HDMI_1"}
+    await tv.set_app("com.webos.app.hdmi2")
+    await wait_for(lambda: kodi.overlay == [True])
+    assert w.status()["transparent_active"] is True
+    await w.close()
+
+
+async def test_stop_during_apply_still_restores(tv, controller, monkeypatch):
+    rules = PlaybackRules(controller, dataclasses.replace(BASE, rules_debounce=0.05))
+    real = controller.get_picture_mode
+
+    async def slow_readback():
+        await asyncio.sleep(0.3)  # TV slow to confirm the change
+        return await real()
+
+    monkeypatch.setattr(controller, "get_picture_mode", slow_readback)
+    rules.arm({"picture": "filmmaker", "screen_off": False, "power_off_at_end": False})
+    rules.av_started("hdr10")
+    await wait_for(lambda: tv.model.picture_mode == "hdrFilmMaker")
+    rules.stopped()  # while the apply is still verifying
+    await wait_for(lambda: tv.model.picture_mode == "filmMaker")
+    await rules.close()

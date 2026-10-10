@@ -216,6 +216,10 @@ class WebOsService:
             for part in (self.rules, self.watcher):
                 if part is not None:
                     self.loop.call_soon_threadsafe(part.update, settings)
+            # Someone is changing settings in Kodi's UI, so the TV is
+            # showing Kodi right now: a good moment to learn its input.
+            if self.watcher is not None:
+                self.loop.call_soon_threadsafe(self.watcher.learn_input, "settings changed")
         if self.controller is not None:
             self._submit(self.controller.reconfigure(settings))
 
@@ -258,6 +262,8 @@ class WebOsService:
         log.debug(f"request {name} {args}")
         try:
             result = await actions.dispatch(self.controller, name, args, rules=self.rules)
+            if name == "status" and self.watcher is not None:
+                result = {**result, **self.watcher.status()}
             reply = ipc.reply_ok(request_id, result)
         except ActionError as err:
             level = log.info if isinstance(err, BadRequest) else log.warning

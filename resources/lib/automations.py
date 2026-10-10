@@ -62,6 +62,7 @@ class PlaybackRules:
         self._override: dict | None = None
         self._screen_off = False
         self._ended = False
+        self._busy = False
         controller.picture_listeners.append(self._on_picture)
 
     def update(self, settings: Settings) -> None:
@@ -82,13 +83,25 @@ class PlaybackRules:
             self.idle_mode = mode
 
     def _schedule(self, coro_factory, delay: float | None = None) -> None:
-        if self._pending is not None and not self._pending.done():
-            self._pending.cancel()
-        self._pending = asyncio.ensure_future(self._delayed(coro_factory, delay))
+        previous = self._pending
+        if previous is not None and not previous.done() and not self._busy:
+            # Still in its debounce delay: replace it.
+            previous.cancel()
+            previous = None
+        self._pending = asyncio.ensure_future(self._delayed(coro_factory, delay, previous))
 
-    async def _delayed(self, coro_factory, delay: float | None) -> None:
+    async def _delayed(self, coro_factory, delay: float | None, previous) -> None:
+        if previous is not None:
+            # An apply/restore already talking to the TV runs to completion,
+            # so stopping mid-apply still restores afterwards.
+            with contextlib.suppress(Exception):
+                await previous
         await asyncio.sleep(max(0.0, self.settings.rules_debounce if delay is None else delay))
-        await coro_factory()
+        self._busy = True
+        try:
+            await coro_factory()
+        finally:
+            self._busy = False
 
     def arm(self, override: dict) -> dict:
         """Use this override for the next playback session.
