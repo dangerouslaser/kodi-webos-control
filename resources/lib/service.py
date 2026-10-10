@@ -88,7 +88,11 @@ class WebOsService:
 
         self._submit(create()).result(timeout=5)
         self.monitor = _Monitor(self)
-        log.info(f"service started (host {self.settings.host})")
+        log.info(
+            f"service started (host {self.settings.host}, "
+            f"Python {sys.version.split()[0]}, "
+            f"Kodi {xbmc.getInfoLabel('System.BuildVersion') or 'unknown'})"
+        )
         return True
 
     def _loop_main(self) -> None:
