@@ -127,12 +127,9 @@ async def _status(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any]:
     status = tv.status()
     if tv.connected and not status["firmware"]:
         try:
-            software = await tv.software_info()
+            status["firmware"] = await tv.firmware()
         except Exception:  # noqa: BLE001
-            software = {}
-        status["firmware"] = " ".join(
-            str(software.get(k, "")) for k in ("product_name", "major_ver", "minor_ver")
-        ).strip()
+            pass
     return status
 
 

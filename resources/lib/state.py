@@ -55,7 +55,8 @@ class TvState:
             for app_id_, i in (tv_state.inputs or {}).items()
         )
         current_input = next((i for i in inputs if i[2] == app_id), None)
-        title = dict(apps).get(app_id, "")
+        # Unrenamed HDMI inputs aren't launch points; use the input label.
+        title = dict(apps).get(app_id, "") or (current_input[1] if current_input else "")
         power = (tv_state.power_state or {}).get("state", "")
         if not power and connected:
             power = "Active" if tv_state.is_on else ""

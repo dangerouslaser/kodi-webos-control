@@ -305,3 +305,39 @@ async def test_pairing_prompt_timeout_blocks(patch_ports, monkeypatch):
     finally:
         await controller.stop()
         await tv.stop()
+
+
+async def test_firmware_from_software_info(tv):
+    controller, _ = make_controller()
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected)
+        assert await controller.firmware() == "webOSTV 23 03 30.50"
+    finally:
+        await controller.stop()
+
+
+async def test_firmware_falls_back_to_configs_when_sw_info_denied(tv):
+    # webOS 10 answers getCurrentSWInformation with 401.
+    tv.fail_uris["com.webos.service.update/getCurrentSWInformation"] = "401 insufficient permissions"
+    controller, _ = make_controller()
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected)
+        assert await controller.firmware() == "33.30.97 (webOS 10.3.0)"
+        assert controller.status()["firmware"] == "33.30.97 (webOS 10.3.0)"
+    finally:
+        await controller.stop()
+
+
+async def test_app_title_falls_back_to_input_label(tv):
+    controller, _ = make_controller()
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected)
+        await controller.set_input("HDMI_3")
+        home = xbmcgui.Window(10000)
+        await wait_for(lambda: home.getProperty("WebOS.Input") == "HDMI_3")
+        assert home.getProperty("WebOS.AppTitle") == "HDMI 3"
+    finally:
+        await controller.stop()

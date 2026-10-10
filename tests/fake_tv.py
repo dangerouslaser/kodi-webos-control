@@ -27,6 +27,8 @@ NOT_FOUND = "404 no such service or method"
 DEFAULT_INPUTS = [
     {"id": "HDMI_1", "label": "HDMI 1", "appId": "com.webos.app.hdmi1"},
     {"id": "HDMI_2", "label": "Apple TV", "appId": "com.webos.app.hdmi2"},
+    # Unrenamed inputs aren't launch points on real TVs.
+    {"id": "HDMI_3", "label": "HDMI 3", "appId": "com.webos.app.hdmi3"},
 ]
 DEFAULT_APPS = [
     {"id": "netflix", "title": "Netflix"},
@@ -288,6 +290,10 @@ class FakeTv:
             "com.webos.media/getForegroundAppInfo",
         }:
             return self._payload(uri, payload)
+        if uri == "config/getConfigs":
+            known = {"tv.nyx.firmwareVersion": "33.30.97", "tv.nyx.platformVersion": "10.3.0"}
+            names = payload.get("configNames", [])
+            return {"configs": {k: v for k, v in known.items() if k in names}, **ok}
         if uri == "audio/setVolume":
             m.volume = int(payload["volume"])
             return ok

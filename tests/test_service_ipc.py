@@ -179,7 +179,7 @@ def test_ui_input_and_status_flow(running):
     script.main(["default.py"])
     wait_until(lambda: tv.model.app_id == "com.webos.app.hdmi2")
     heading, labels = xbmcgui.selects[1]
-    assert labels == ["HDMI 1", "Apple TV"]
+    assert labels == ["HDMI 1", "Apple TV", "HDMI 3"]
     assert "Connected: yes" in xbmcgui.textviewers[-1][1]
 
 

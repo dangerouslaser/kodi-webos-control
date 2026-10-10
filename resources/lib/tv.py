@@ -69,6 +69,7 @@ class TvController:
         self._task: asyncio.Task | None = None
         self._failure_notified = False
         self._had_key = False
+        self._firmware: tuple[WebOsClient, str] | None = None
         self.picture_preset = ""
 
     # lifecycle -----------------------------------------------------------
@@ -406,21 +407,44 @@ class TvController:
         uri = uri.removeprefix("ssap://")
         return await self._call("request", uri, payload)
 
-    async def software_info(self) -> dict[str, Any]:
+    async def firmware(self) -> str:
+        """Firmware version string, cached per connection.
+
+        getCurrentSWInformation returns 401 on newer firmware (webOS 10+),
+        so fall back to the tv.nyx.* config values, which stay readable.
+        """
         client = self._require()
-        if client.tv_info.software:
-            return client.tv_info.software
-        return await self._call("get_software_info")
+        if self._firmware is not None and self._firmware[0] is client:
+            return self._firmware[1]
+        text = ""
+        software = client.tv_info.software
+        if not software:
+            with contextlib.suppress(CommandFailed):
+                software = await self._call("get_software_info")
+        if software:
+            text = " ".join(
+                str(software.get(k, "")) for k in ("product_name", "major_ver", "minor_ver")
+            ).strip()
+        if not text:
+            with contextlib.suppress(CommandFailed):
+                res = await self._call(
+                    "request",
+                    "config/getConfigs",
+                    {"configNames": ["tv.nyx.firmwareVersion", "tv.nyx.platformVersion"]},
+                )
+                configs = res.get("configs") or {}
+                version = configs.get("tv.nyx.firmwareVersion", "")
+                platform = configs.get("tv.nyx.platformVersion", "")
+                text = f"{version} (webOS {platform})" if version and platform else version
+        self._firmware = (client, text)
+        return text
 
     def status(self) -> dict[str, Any]:
         client = self.client
-        software = client.tv_info.software if client else {}
         system = client.tv_info.system if client else {}
         firmware = ""
-        if software:
-            firmware = " ".join(
-                str(software.get(k, "")) for k in ("product_name", "major_ver", "minor_ver")
-            ).strip()
+        if self._firmware is not None and self._firmware[0] is client:
+            firmware = self._firmware[1]
         return {
             "host": self.active_host,
             "configured_host": self.settings.host,
