@@ -64,6 +64,7 @@ class WindowDialog:
     def __init__(self) -> None:
         self._closed = threading.Event()
         self.shown = threading.Event()
+        self._created_in = threading.current_thread()
 
     def doModal(self) -> None:  # noqa: N802
         modal_windows.append(self)

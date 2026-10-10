@@ -4,6 +4,7 @@ one-shot playback overrides (context menu)."""
 from __future__ import annotations
 
 import asyncio
+import time
 import dataclasses
 
 import pytest
@@ -291,8 +292,12 @@ def test_overlay_forwards_presses():
     sent = []
     overlay = remote.Overlay(lambda name, args: sent.append((name, args)), lambda: "HDMI_1")
     overlay.open()
+    deadline = time.monotonic() + 2
+    while overlay._window is None and time.monotonic() < deadline:
+        time.sleep(0.01)
     window = overlay._window
-    assert window.shown.wait(2)
+    assert window is not None and window.shown.wait(2)
+    assert window._created_in is overlay._thread  # see remote._modal
     window.press(4)
     window.press(229)
     window.press(229)

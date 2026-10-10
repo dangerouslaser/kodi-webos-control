@@ -94,12 +94,13 @@ class Overlay:
         self._lock = threading.Lock()
         self._window: _Catcher | None = None
         self._thread: threading.Thread | None = None
+        self._closing = False
         # webOS has no play/pause toggle button; alternate PAUSE and PLAY.
         self._sent_pause = False
 
     @property
     def active(self) -> bool:
-        return self._window is not None
+        return self._thread is not None and self._thread.is_alive()
 
     def set_active(self, active: bool) -> None:
         if active:
@@ -109,15 +110,21 @@ class Overlay:
 
     def open(self) -> None:
         with self._lock:
-            if self._window is not None:
+            if self.active:
                 return
-            self._window = _Catcher(self._handle)
-            self._thread = threading.Thread(
-                target=self._modal, args=(self._window,), name="webostv-remote", daemon=True
-            )
+            self._closing = False
+            self._thread = threading.Thread(target=self._modal, name="webostv-remote", daemon=True)
             self._thread.start()
 
-    def _modal(self, window: _Catcher) -> None:
+    def _modal(self) -> None:
+        # Kodi runs a window's onAction on the thread that created the
+        # window, and only while that thread sits in doModal(). So create
+        # and show it here, never on the asyncio loop thread.
+        window = _Catcher(self._handle)
+        with self._lock:
+            if self._closing:
+                return
+            self._window = window
         # Don't let the screensaver eat the first key press.
         xbmc.executebuiltin("InhibitScreensaver(true)")
         try:
@@ -127,9 +134,11 @@ class Overlay:
             with self._lock:
                 if self._window is window:
                     self._window = None
+            del window
 
     def close(self) -> None:
         with self._lock:
+            self._closing = True
             window, self._window = self._window, None
         if window is not None:
             window.close()
