@@ -15,8 +15,27 @@ See [`spec.md`](spec.md) for the full design.
 | 2. Headless service | Done: loop thread, pairing, key storage, reconnect/backoff, loopback→LAN fallback, Window properties |
 | 3. Actions + IPC | Done: action registry, `RunScript` argv parsing, NotifyAll request/reply, example keymap |
 | 4. UI + settings | Done: program UI, settings v2, Re-pair, debug logging, strings.po |
-| 5. On-device validation | Not started. Needs a TV (see checklist in spec) |
+| 5. On-device validation | Off-TV mode done (see below); on-TV mode not yet tested |
 | 6. Phase 2 (picture presets, HDR rules) | Not started |
+
+### On-device results
+
+Kodi 22.0 RC1 on a separate box controlling an LG OLED77G5WUA (webOS 10.3.0, firmware 33.30.97),
+driven over JSON-RPC (`JSONRPC.NotifyAll`) on 2026-10-10:
+
+- Pairing, key storage, and reconnect after addon upgrades without re-prompting.
+- `status`, `command`, `catalog`, `volume`, `mute`, `button`, `sound_output`, `toast`, `app`,
+  `input`, `screen`, `power_off`, and `power_on` (Wake-on-LAN, MAC learned automatically) all
+  work; bad requests are rejected before reaching the TV. Replies arrive in ~50–200 ms.
+- Skin properties follow TV-side changes within about 1 s, with no polling.
+- With Quick Start+ on, `power_off` puts the TV in `Active Standby` and the control connection
+  stays up, so use `WebOS.On` / `WebOS.Power` (not `WebOS.Connected`) to tell if the TV is on.
+- This firmware refuses plain `ws://` on port 3000; the `wss://` 3001 fallback is used.
+- `getCurrentSWInformation` returns 401; firmware comes from `config/getConfigs` instead.
+- Find TV lists the TV and filters out other SSDP responders (a Hue bridge).
+- Not tested on hardware: following a paired TV to a new IP (the test TV has a static IP;
+  covered by tests against the fake TV), and the drop/reconnect path when the TV fully
+  powers off.
 
 ## Install
 
