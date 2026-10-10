@@ -90,6 +90,12 @@ class _KodiSide:
         xbmc.executebuiltin("ShutDown()")
 
     def set_overlay(self, active: bool) -> None:
+        # The "home" action (another process) reads this.
+        window = xbmcgui.Window(10000)
+        if active:
+            window.setProperty("WebOS.TransparentControl", "true")
+        else:
+            window.clearProperty("WebOS.TransparentControl")
         if self._service.overlay is not None:
             self._service.overlay.set_active(active)
 

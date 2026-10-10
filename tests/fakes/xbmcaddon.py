@@ -24,6 +24,7 @@ _DEFAULTS = {
     "on_switch_away": "0",
     "resume_on_return": "true",
     "transparent_control": "false",
+    "home_opens_tv_home": "true",
 }
 
 

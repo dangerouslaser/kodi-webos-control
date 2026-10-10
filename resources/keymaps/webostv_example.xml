@@ -22,6 +22,8 @@
       <f12>RunScript(service.webostv,power_off)</f12>
     </keyboard>
     <remote>
+      <!-- Smart Home: Kodi home, or the LG home when already there -->
+      <home>RunScript(service.webostv,home)</home>
       <red>RunScript(service.webostv,button,INPUT_HUB)</red>
       <green>RunScript(service.webostv,ui)</green>
     </remote>

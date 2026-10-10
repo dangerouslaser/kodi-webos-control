@@ -353,3 +353,11 @@ msgstr ""
 msgctxt "#32309"
 msgid "Automatic"
 msgstr ""
+
+msgctxt "#32207"
+msgid "Home on Kodi's home screen opens the LG home"
+msgstr ""
+
+msgctxt "#32257"
+msgid "For the home action (RunScript(service.webostv,home)): pressing Home while Kodi is already on its home screen opens the TV's home screen. Map your remote's Home button to that action; Kodi's built-in Home can't be detected."
+msgstr ""

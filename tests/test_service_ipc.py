@@ -347,3 +347,23 @@ def test_tv_off_runs_kodi_action(running):
     xbmc.conditions["Player.Playing"] = True
     tv.runner.run(tv.set_power("Active Standby"))
     wait_until(lambda: "PlayerControl(Stop)" in xbmc.builtins)
+
+
+def test_smart_home(running):
+    _service, tv = running
+    # Somewhere in Kodi other than home: Kodi's home screen.
+    script.main(["default.py", "home"])
+    assert xbmc.builtins[-1] == "ActivateWindow(Home)"
+    # Already on Kodi's home screen: the TV's home.
+    xbmc.conditions["Window.IsActive(home) + !System.HasActiveModalDialog + !System.HasVisibleModalDialog"] = True
+    script.main(["default.py", "home"])
+    wait_until(lambda: tv.buttons == ["HOME"])
+    # Option off: stays in Kodi.
+    xbmcaddon.settings["home_opens_tv_home"] = "false"
+    script.main(["default.py", "home"])
+    assert xbmc.builtins[-1] == "ActivateWindow(Home)"
+    # Transparent control active: always the TV's home.
+    xbmc.conditions.clear()
+    xbmcgui.Window(10000).setProperty("WebOS.TransparentControl", "true")
+    script.main(["default.py", "home"])
+    wait_until(lambda: tv.buttons == ["HOME", "HOME"])
