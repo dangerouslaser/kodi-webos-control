@@ -114,6 +114,7 @@ class WebOsService:
         self.player: _Player | None = None
         self.rules: Any = None
         self.watcher: Any = None
+        self._inputs: tuple = ()
         self.overlay: Any = None
 
     # entry ---------------------------------------------------------------
@@ -155,7 +156,7 @@ class WebOsService:
             # controller (which builds clients) is created on the loop.
             self.controller = TvController(
                 self.settings,
-                on_state=self.publisher.publish,
+                on_state=self._on_state,
                 on_mac=self.save_mac,
                 on_host=self.save_host,
                 notify=self.notify,
@@ -165,6 +166,7 @@ class WebOsService:
             self.watcher = TvWatcher(self.controller, self.settings, _KodiSide(self))
 
         self._submit(create()).result(timeout=5)
+        self.publish_setting_labels()
         self.monitor = _Monitor(self)
         self.player = _Player(self)
         log.info(
@@ -212,12 +214,44 @@ class WebOsService:
 
     # Kodi callbacks (Kodi thread) ---------------------------------------
 
+    def _on_state(self, state: Any) -> None:
+        self.publisher.publish(state)
+        # Input names arrive after connecting; refresh WebOS.KodiInput.
+        if state.inputs and state.inputs != self._inputs:
+            self._inputs = state.inputs
+            self.publish_setting_labels()
+
+    def publish_setting_labels(self) -> None:
+        """WebOS.Rule.<kind>: friendly name of each HDR rule preset (skins)."""
+        from .presets import label  # noqa: PLC0415
+
+        window = xbmcgui.Window(10000)
+        s = self.settings
+        # Kodi's input, with the TV's name for it when known.
+        kodi_input = s.kodi_input
+        state = getattr(self.controller, "state", None)
+        for input_id, input_label, _app in getattr(state, "inputs", ()):
+            if input_id == kodi_input and input_label != input_id:
+                kodi_input = f"{input_label} ({input_id})"
+        for key, value in (("KodiInput", kodi_input), ("ConfiguredHost", s.host)):
+            if value:
+                window.setProperty(f"WebOS.{key}", value)
+            else:
+                window.clearProperty(f"WebOS.{key}")
+        for kind, value in (("SDR", s.preset_sdr), ("HDR10", s.preset_hdr10),
+                            ("HLG", s.preset_hlg), ("DolbyVision", s.preset_dv)):
+            if value:
+                window.setProperty(f"WebOS.Rule.{kind}", label(value))
+            else:
+                window.clearProperty(f"WebOS.Rule.{kind}")
+
     def reload_settings(self) -> None:
         settings = Settings.load()
         log.set_debug(settings.debug)
         if settings == self.settings:
             return
         self.settings = settings
+        self.publish_setting_labels()
         if self.loop is not None:
             for part in (self.rules, self.watcher):
                 if part is not None:

@@ -153,7 +153,14 @@ def choose_picture_preset() -> None:
         _call("picture_preset", [values[index]])
 
 
-def choose_rule_preset(kind: str) -> None:
+def _back_to_settings(stay: bool) -> None:
+    # Settings dialog buttons close the dialog; reopen it unless called
+    # from a skin page ("stay").
+    if not stay:
+        xbmc.executebuiltin("Addon.OpenSettings(service.webostv)")
+
+
+def choose_rule_preset(kind: str, stay: bool = False) -> None:
     """Settings button: pick the preset a playback rule applies."""
     from . import presets  # noqa: PLC0415
 
@@ -174,10 +181,10 @@ def choose_rule_preset(kind: str) -> None:
     index = _dialog().select(lang.get(lang.PICTURE_PRESET), labels)
     if index >= 0:
         addon.setSetting(setting_id, options[index])
-    xbmc.executebuiltin("Addon.OpenSettings(service.webostv)")
+    _back_to_settings(stay)
 
 
-def choose_kodi_input() -> None:
+def choose_kodi_input(stay: bool = False) -> None:
     """Settings button: which TV input Kodi's box is plugged into."""
     reply = _call("catalog")
     addon = xbmcaddon.Addon("service.webostv")
@@ -192,7 +199,7 @@ def choose_kodi_input() -> None:
         index = _dialog().select(lang.get(lang.KODI_INPUT), labels)
         if index >= 0:
             addon.setSetting("kodi_input", options[index])
-    xbmc.executebuiltin("Addon.OpenSettings(service.webostv)")
+    _back_to_settings(stay)
 
 
 def choose_volume() -> None:
@@ -203,6 +210,37 @@ def choose_volume() -> None:
     text = _dialog().numeric(0, lang.get(lang.VOLUME), "" if current is None else str(current))
     if text and text.isdigit():
         _call("volume", [str(min(100, int(text)))])
+
+
+# Settings a skin page may change: bools toggle, options open a picker.
+EDITABLE_BOOLS = {
+    "rules_enabled", "restore_on_stop", "resume_on_return", "transparent_control",
+    "toast_on_connect", "auto_discover", "loopback_fallback", "debug",
+}
+EDITABLE_OPTIONS = {
+    "on_tv_off": (32210, 32211, 32212, 32213),
+    "on_switch_away": (32210, 32211, 32212),
+}
+OPTION_HEADINGS = {"on_tv_off": 32203, "on_switch_away": 32204}
+
+
+def change_setting(key: str) -> None:
+    """RunScript(service.webostv,setting,<id>): toggle or pick a value."""
+    key = key.strip()
+    addon = xbmcaddon.Addon("service.webostv")
+    if key in EDITABLE_BOOLS:
+        addon.setSetting(key, "false" if addon.getSettingBool(key) else "true")
+    elif key in EDITABLE_OPTIONS:
+        labels = [addon.getLocalizedString(i) or str(i) for i in EDITABLE_OPTIONS[key]]
+        try:
+            current = int(addon.getSetting(key) or 0)
+        except ValueError:
+            current = 0
+        heading = addon.getLocalizedString(OPTION_HEADINGS[key]) or key
+        index = _dialog().select(heading, [_mark(t, i == current) for i, t in enumerate(labels)],
+                                 preselect=current)
+        if index >= 0:
+            addon.setSetting(key, str(index))
 
 
 def remote() -> None:

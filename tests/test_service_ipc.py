@@ -356,6 +356,9 @@ def test_skin_properties_and_ui_pages(running):
     wait_until(lambda: home.getProperty("WebOS.PicturePresetLabel") == "Filmmaker Mode")
     assert home.getProperty("WebOS.SoundOutputLabel") == "TV speaker"
     assert home.getProperty("WebOS.Model")
+    xbmcaddon.settings["kodi_input"] = "HDMI_1"
+    _service.reload_settings()
+    assert home.getProperty("WebOS.KodiInput") == "HDMI 1 (HDMI_1)"
     # RunScript(service.webostv,ui,volume) -> numeric dialog -> TV volume
     xbmcgui.input_answers.append("23")
     script.main(["default.py", "ui", "volume"])
@@ -365,3 +368,31 @@ def test_skin_properties_and_ui_pages(running):
     script.main(["default.py", "ui", "sound_output"])
     assert xbmcgui.selects[-1][1][:2] == ["TV speaker  [current]", "HDMI ARC"]
     wait_until(lambda: tv.model.sound_output == "external_arc")
+
+
+def test_skin_setting_actions(running):
+    service, _tv = running
+    # toggle a bool
+    script.main(["default.py", "setting", "transparent_control"])
+    assert xbmcaddon.settings["transparent_control"] == "true"
+    script.main(["default.py", "setting", "transparent_control"])
+    assert xbmcaddon.settings["transparent_control"] == "false"
+    # option picker
+    xbmcgui.select_answers.append(2)
+    script.main(["default.py", "setting", "on_tv_off"])
+    assert xbmcaddon.settings["on_tv_off"] == "2"
+    assert len(xbmcgui.selects[-1][1]) == 4
+    # unknown settings are ignored
+    script.main(["default.py", "setting", "host"])
+    assert xbmcaddon.settings["host"] == "127.0.0.1"
+    # rule preset chooser from a skin page doesn't reopen addon settings
+    xbmcgui.select_answers.append(1)
+    script.main(["default.py", "choose_preset", "hdr10", "stay"])
+    assert xbmcaddon.settings["preset_hdr10"] == "hdrCinema"
+    assert "Addon.OpenSettings(service.webostv)" not in xbmc.builtins
+    service.reload_settings()
+    assert xbmcgui.Window(10000).getProperty("WebOS.Rule.HDR10") == "Cinema (HDR)"
+    xbmcaddon.settings["kodi_input"] = "HDMI_2"
+    service.reload_settings()
+    assert xbmcgui.Window(10000).getProperty("WebOS.KodiInput") == "Apple TV (HDMI_2)"
+    assert xbmcgui.Window(10000).getProperty("WebOS.ConfiguredHost") == "127.0.0.1"

@@ -24,10 +24,12 @@ def main(argv: list[str]) -> None:
             ui.find_tv()
         elif name == "ui" and len(args) > 1:
             ui.run_page(args[1])
+        elif name == "setting":
+            ui.change_setting(args[1] if len(args) > 1 else "")
         elif name == "choose_kodi_input":
-            ui.choose_kodi_input()
+            ui.choose_kodi_input(stay="stay" in args[1:])
         elif name == "choose_preset":
-            ui.choose_rule_preset(args[1] if len(args) > 1 else "")
+            ui.choose_rule_preset(args[1] if len(args) > 1 else "", stay="stay" in args[2:])
         else:
             ui.run()
         return

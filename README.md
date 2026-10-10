@@ -84,6 +84,7 @@ Every action works the same from `RunScript`, keymaps, skin buttons, and JSON-RP
 | `command` | SSAP uri, optional JSON payload | `RunScript(service.webostv,command,ssap://system/getSystemInfo)` |
 | `status` | none | Shows connection, model, firmware |
 | `repair` | none | Forgets the key and re-prompts on the TV |
+| `setting` | setting id | Toggles an on/off setting or picks an option (skins): `rules_enabled`, `restore_on_stop`, `resume_on_return`, `transparent_control`, `toast_on_connect`, `auto_discover`, `loopback_fallback`, `debug`, `on_tv_off`, `on_switch_away` |
 | `ui` | optional page: `picture_preset`, `input`, `app`, `sound_output`, `volume`, `remote`, `toast`, `status`, `find_tv`, `repair` | Opens the program UI, or one of its pickers directly (for skins) |
 
 `RunScript` splits arguments on commas; the addon rejoins free text (toast messages, JSON
@@ -178,6 +179,9 @@ Published on `Window(Home)`; only changed values are written.
 | `WebOS.PicturePreset` / `WebOS.PicturePresetLabel` | `filmMaker` / `Filmmaker Mode` (live, includes changes from the LG remote) |
 | `WebOS.Model` | `OLED77G5WUA.DUSQLJR` |
 | `WebOS.TransparentControl` | `true` while transparent control is catching keys |
+| `WebOS.KodiInput` | `Streaming Box (HDMI_1)` (Kodi's TV input setting, with the TV's name) |
+| `WebOS.ConfiguredHost` | `192.168.1.224` (host setting) |
+| `WebOS.Rule.SDR` / `.HDR10` / `.HLG` / `.DolbyVision` | `Cinema (HDR)` (HDR rule presets, friendly names) |
 
 Example: `$INFO[Window(Home).Property(WebOS.Volume)]`.
 
