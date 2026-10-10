@@ -84,8 +84,7 @@ Every action works the same from `RunScript`, keymaps, skin buttons, and JSON-RP
 | `command` | SSAP uri, optional JSON payload | `RunScript(service.webostv,command,ssap://system/getSystemInfo)` |
 | `status` | none | Shows connection, model, firmware |
 | `repair` | none | Forgets the key and re-prompts on the TV |
-| `home` | none | Smart Home (see TV integration) |
-| `ui` | none | Opens the program UI (also the default with no args) |
+| `ui` | optional page: `picture_preset`, `input`, `app`, `sound_output`, `volume`, `remote`, `toast`, `status`, `find_tv`, `repair` | Opens the program UI, or one of its pickers directly (for skins) |
 
 `RunScript` splits arguments on commas; the addon rejoins free text (toast messages, JSON
 payloads), so `RunScript(service.webostv,toast,Hello, world)` works.
@@ -142,12 +141,6 @@ mode it reports at the instant playback starts isn't a safe restore target.
   playback keys, channel up/down, volume and mute. Kodi's context-menu key switches the TV back to
   Kodi (and closes the dialog). Off-TV only: Kodi on the TV gets no key presses in the background.
 
-- **Smart Home** (`home` action): Kodi's home screen, or the LG home screen when Kodi is already
-  on its home screen (*Home on Kodi's home screen opens the LG home*) or when transparent control is
-  active. Kodi's built-in Home (keymaps, JSON-RPC `Input.Home`) gives an addon no way to see a
-  repeat press, so point the remote's Home button at this action instead:
-  `RunScript(service.webostv,home)` in a keymap, or over JSON-RPC
-  `{"method": "Addons.ExecuteAddon", "params": {"addonid": "service.webostv", "params": ["home"]}}`.
 
 ### Video context menu
 
@@ -181,8 +174,10 @@ Published on `Window(Home)`; only changed values are written.
 | `WebOS.Muted` | `false` |
 | `WebOS.App` / `WebOS.AppTitle` | `netflix` / `Netflix` |
 | `WebOS.Input` / `WebOS.InputLabel` | `HDMI_2` / `Apple TV` |
-| `WebOS.SoundOutput` | `external_arc` |
-| `WebOS.PicturePreset` | `filmMaker` (live, includes changes from the LG remote) |
+| `WebOS.SoundOutput` / `WebOS.SoundOutputLabel` | `external_arc` / `HDMI ARC` |
+| `WebOS.PicturePreset` / `WebOS.PicturePresetLabel` | `filmMaker` / `Filmmaker Mode` (live, includes changes from the LG remote) |
+| `WebOS.Model` | `OLED77G5WUA.DUSQLJR` |
+| `WebOS.TransparentControl` | `true` while transparent control is catching keys |
 
 Example: `$INFO[Window(Home).Property(WebOS.Volume)]`.
 

@@ -10,6 +10,21 @@ import xbmcgui
 HOME_WINDOW = 10000
 PREFIX = "WebOS."
 
+SOUND_OUTPUT_LABELS = {
+    "tv_speaker": "TV speaker",
+    "external_arc": "HDMI ARC",
+    "external_optical": "Optical",
+    "bt_soundbar": "Bluetooth",
+    "tv_external_speaker": "TV speaker + optical",
+    "tv_speaker_headphone": "TV speaker + headphones",
+    "headphone": "Headphones",
+    "lineout": "Line out",
+}
+
+
+def sound_output_label(value: str) -> str:
+    return SOUND_OUTPUT_LABELS.get(value, value.replace("_", " ").capitalize())
+
 
 @dataclass(frozen=True)
 class TvState:
@@ -29,6 +44,7 @@ class TvState:
     input_label: str = ""
     sound_output: str = ""
     picture_preset: str = ""
+    model: str = ""
     # Not published as properties; used by the UI and action resolution.
     apps: tuple[tuple[str, str], ...] = field(default=(), compare=False)
     inputs: tuple[tuple[str, str, str], ...] = field(default=(), compare=False)
@@ -42,6 +58,7 @@ class TvState:
         paired: bool,
         host: str,
         picture_preset: str = "",
+        model: str = "",
     ) -> TvState:
         """Build a snapshot from aiowebostv's WebOsTvState."""
         app_id = tv_state.current_app_id or ""
@@ -75,12 +92,15 @@ class TvState:
             input_label=current_input[1] if current_input else "",
             sound_output=tv_state.sound_output or "",
             picture_preset=picture_preset,
+            model=model,
             apps=apps,
             inputs=inputs,
         )
 
     def properties(self) -> dict[str, str]:
         """Window property values (without the WebOS. prefix)."""
+
+        from .presets import label as preset_label  # noqa: PLC0415
 
         def flag(value: bool | None) -> str:
             return "" if value is None else ("true" if value else "false")
@@ -99,7 +119,10 @@ class TvState:
             "Input": self.input_id,
             "InputLabel": self.input_label,
             "SoundOutput": self.sound_output,
+            "SoundOutputLabel": sound_output_label(self.sound_output) if self.sound_output else "",
             "PicturePreset": self.picture_preset,
+            "PicturePresetLabel": preset_label(self.picture_preset) if self.picture_preset else "",
+            "Model": self.model,
         }
 
 

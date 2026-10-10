@@ -425,6 +425,7 @@ class TvController:
                 paired=self.keystore.get(self.settings.host) is not None,
                 host=self.active_host,
                 picture_preset=self.picture_preset if connected else "",
+                model=str((client.tv_info.system or {}).get("modelName") or ""),
             )
         else:
             snapshot = TvState(

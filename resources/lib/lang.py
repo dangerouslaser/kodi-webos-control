@@ -29,6 +29,7 @@ RESUME_FROM = 32306
 FROM_START = 32307
 KODI_INPUT = 32308
 AUTOMATIC = 32309
+VOLUME = 32310
 
 _FALLBACK = {
     INPUTS: "Inputs",
@@ -54,6 +55,7 @@ _FALLBACK = {
     FROM_START: "Play from beginning",
     KODI_INPUT: "Kodi's TV input",
     AUTOMATIC: "Automatic",
+    VOLUME: "Volume",
 }
 
 

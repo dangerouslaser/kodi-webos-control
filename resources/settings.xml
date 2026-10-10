@@ -261,11 +261,6 @@
           <default>false</default>
           <control type="toggle"/>
         </setting>
-        <setting id="home_opens_tv_home" type="boolean" label="32207" help="32257">
-          <level>0</level>
-          <default>true</default>
-          <control type="toggle"/>
-        </setting>
       </group>
     </category>
     <category id="pairing" label="32020" help="">

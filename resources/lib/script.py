@@ -16,15 +16,14 @@ ADDON_NAME = "LG webOS TV"
 
 def main(argv: list[str]) -> None:
     args = [a for a in argv[1:] if a != ""]
-    if args and args[0].strip().lower() == "home":
-        home()
-        return
     if not args or args[0].strip().lower() in actions.LOCAL_ACTIONS:
         from . import ui  # noqa: PLC0415
 
         name = args[0].strip().lower() if args else "ui"
         if name == "find_tv":
             ui.find_tv()
+        elif name == "ui" and len(args) > 1:
+            ui.run_page(args[1])
         elif name == "choose_kodi_input":
             ui.choose_kodi_input()
         elif name == "choose_preset":
@@ -33,28 +32,6 @@ def main(argv: list[str]) -> None:
             ui.run()
         return
     run_action(args[0], args[1:])
-
-
-def home() -> None:
-    """Smart Home for remotes: Kodi home, or the LG home when already there.
-
-    - Transparent control active (TV showing something else): TV Home.
-    - Kodi already on its home screen, nothing open on top: TV Home
-      (setting "home_opens_tv_home").
-    - Anywhere else in Kodi: Kodi's home screen, as usual.
-    """
-    import xbmc  # noqa: PLC0415
-    import xbmcaddon  # noqa: PLC0415
-
-    transparent = xbmcgui.Window(10000).getProperty("WebOS.TransparentControl") == "true"
-    at_home = xbmc.getCondVisibility(
-        "Window.IsActive(home) + !System.HasActiveModalDialog + !System.HasVisibleModalDialog"
-    )
-    enabled = xbmcaddon.Addon("service.webostv").getSettingBool("home_opens_tv_home")
-    if transparent or (at_home and enabled):
-        ipc.send("button", ["HOME"])
-    else:
-        xbmc.executebuiltin("ActivateWindow(Home)")
 
 
 def run_action(name: str, args: list[Any]) -> dict[str, Any] | None:

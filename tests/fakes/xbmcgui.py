@@ -98,6 +98,9 @@ class Dialog:
     def textviewer(self, heading: str, text: str, *_a: Any, **_k: Any) -> None:
         textviewers.append((heading, text))
 
+    def numeric(self, _type: int, heading: str, default: str = "", *_a: Any) -> str:
+        return input_answers.pop(0) if input_answers else ""
+
     def contextmenu(self, items: list[str]) -> int:
         contextmenus.append([str(i) for i in items])
         return select_answers.pop(0) if select_answers else -1

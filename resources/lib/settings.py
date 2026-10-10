@@ -44,7 +44,6 @@ class Settings:
     on_switch_away: str = "none"
     resume_on_return: bool = True
     transparent_control: bool = False
-    home_opens_tv_home: bool = True
 
     @classmethod
     def load(cls, addon: xbmcaddon.Addon | None = None) -> Settings:
@@ -78,7 +77,6 @@ class Settings:
             on_switch_away=_option(addon, "on_switch_away", SWITCH_AWAY_ACTIONS),
             resume_on_return=addon.getSettingBool("resume_on_return"),
             transparent_control=addon.getSettingBool("transparent_control"),
-            home_opens_tv_home=addon.getSettingBool("home_opens_tv_home"),
         )
 
     @property

@@ -349,21 +349,19 @@ def test_tv_off_runs_kodi_action(running):
     wait_until(lambda: "PlayerControl(Stop)" in xbmc.builtins)
 
 
-def test_smart_home(running):
+
+def test_skin_properties_and_ui_pages(running):
     _service, tv = running
-    # Somewhere in Kodi other than home: Kodi's home screen.
-    script.main(["default.py", "home"])
-    assert xbmc.builtins[-1] == "ActivateWindow(Home)"
-    # Already on Kodi's home screen: the TV's home.
-    xbmc.conditions["Window.IsActive(home) + !System.HasActiveModalDialog + !System.HasVisibleModalDialog"] = True
-    script.main(["default.py", "home"])
-    wait_until(lambda: tv.buttons == ["HOME"])
-    # Option off: stays in Kodi.
-    xbmcaddon.settings["home_opens_tv_home"] = "false"
-    script.main(["default.py", "home"])
-    assert xbmc.builtins[-1] == "ActivateWindow(Home)"
-    # Transparent control active: always the TV's home.
-    xbmc.conditions.clear()
-    xbmcgui.Window(10000).setProperty("WebOS.TransparentControl", "true")
-    script.main(["default.py", "home"])
-    wait_until(lambda: tv.buttons == ["HOME", "HOME"])
+    home = xbmcgui.Window(10000)
+    wait_until(lambda: home.getProperty("WebOS.PicturePresetLabel") == "Filmmaker Mode")
+    assert home.getProperty("WebOS.SoundOutputLabel") == "TV speaker"
+    assert home.getProperty("WebOS.Model")
+    # RunScript(service.webostv,ui,volume) -> numeric dialog -> TV volume
+    xbmcgui.input_answers.append("23")
+    script.main(["default.py", "ui", "volume"])
+    wait_until(lambda: tv.model.volume == 23)
+    # ui,sound_output lists friendly names
+    xbmcgui.select_answers.append(1)
+    script.main(["default.py", "ui", "sound_output"])
+    assert xbmcgui.selects[-1][1][:2] == ["TV speaker  [current]", "HDMI ARC"]
+    wait_until(lambda: tv.model.sound_output == "external_arc")

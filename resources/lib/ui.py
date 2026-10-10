@@ -49,6 +49,30 @@ def _call(action: str, args: list[Any] | None = None) -> dict[str, Any] | None:
     return None
 
 
+def pages() -> dict[str, Any]:
+    """Entry points for RunScript(service.webostv,ui,<page>) (skins)."""
+    return {
+        "input": choose_input,
+        "app": choose_app,
+        "sound_output": choose_sound_output,
+        "picture_preset": choose_picture_preset,
+        "volume": choose_volume,
+        "remote": remote,
+        "toast": send_toast,
+        "status": status,
+        "find_tv": find_tv,
+        "repair": repair,
+    }
+
+
+def run_page(name: str) -> None:
+    page = pages().get(name.strip().lower())
+    if page is None:
+        run()
+    else:
+        page()
+
+
 def run() -> None:
     menu = (
         (lang.INPUTS, choose_input),
@@ -104,7 +128,9 @@ def choose_sound_output() -> None:
     outputs = list(SOUND_OUTPUTS)
     if current and current not in outputs:
         outputs.insert(0, current)
-    labels = [_mark(o, o == current) for o in outputs]
+    from .state import sound_output_label  # noqa: PLC0415
+
+    labels = [_mark(sound_output_label(o), o == current) for o in outputs]
     index = _dialog().select(lang.get(lang.SOUND_OUTPUT), labels)
     if index >= 0:
         _call("sound_output", [outputs[index]])
@@ -167,6 +193,16 @@ def choose_kodi_input() -> None:
         if index >= 0:
             addon.setSetting("kodi_input", options[index])
     xbmc.executebuiltin("Addon.OpenSettings(service.webostv)")
+
+
+def choose_volume() -> None:
+    reply = _call("status")
+    if not reply:
+        return
+    current = reply["result"].get("volume")
+    text = _dialog().numeric(0, lang.get(lang.VOLUME), "" if current is None else str(current))
+    if text and text.isdigit():
+        _call("volume", [str(min(100, int(text)))])
 
 
 def remote() -> None:
