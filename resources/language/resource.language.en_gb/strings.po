@@ -169,3 +169,55 @@ msgstr ""
 msgctxt "#32116"
 msgid "TV selected"
 msgstr ""
+
+msgctxt "#32030"
+msgid "Playback"
+msgstr ""
+
+msgctxt "#32031"
+msgid "Set picture preset by HDR type"
+msgstr ""
+
+msgctxt "#32032"
+msgid "SDR preset"
+msgstr ""
+
+msgctxt "#32033"
+msgid "HDR10 / HDR10+ preset"
+msgstr ""
+
+msgctxt "#32034"
+msgid "HLG preset"
+msgstr ""
+
+msgctxt "#32035"
+msgid "Dolby Vision preset"
+msgstr ""
+
+msgctxt "#32036"
+msgid "Restore preset when playback stops"
+msgstr ""
+
+msgctxt "#32037"
+msgid "Delay before changing (seconds)"
+msgstr ""
+
+msgctxt "#32081"
+msgid "When a video starts, switch the TV picture preset to the one set for its HDR type."
+msgstr ""
+
+msgctxt "#32082"
+msgid "TV picture preset name, e.g. filmMaker, cinema, expert1, expert2, normal, vivid, game, sports. Leave empty to leave the preset alone."
+msgstr ""
+
+msgctxt "#32086"
+msgid "After playback, switch back to the preset that was in use before."
+msgstr ""
+
+msgctxt "#32087"
+msgid "Wait this long before changing presets, so quick stop/start doesn't make the TV flip back and forth."
+msgstr ""
+
+msgctxt "#32117"
+msgid "Picture preset"
+msgstr ""

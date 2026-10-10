@@ -16,7 +16,7 @@ See [`spec.md`](spec.md) for the full design.
 | 3. Actions + IPC | Done: action registry, `RunScript` argv parsing, NotifyAll request/reply, example keymap |
 | 4. UI + settings | Done: program UI, settings v2, Re-pair, debug logging, strings.po |
 | 5. On-device validation | Off-TV mode done (see below); on-TV mode not yet tested |
-| 6. Phase 2 (picture presets, HDR rules) | Not started |
+| 6. Phase 2 (picture presets, HDR rules) | Built: `picture_preset` action, live `WebOS.PicturePreset`, HDR playback rules. The alert-to-luna workaround is confirmed working on webOS 10.3; the rules haven't yet run on hardware |
 
 ### On-device results
 
@@ -78,6 +78,7 @@ Every action works the same from `RunScript`, keymaps, skin buttons, and JSON-RP
 | `toast` | message | `RunScript(service.webostv,toast,Hello)` |
 | `media` | `play`, `pause`, `stop`, `rewind`, `fast_forward` | `RunScript(service.webostv,media,pause)` |
 | `channel` | `up`, `down`, or channel id | `RunScript(service.webostv,channel,up)` |
+| `picture_preset` | preset name, e.g. `filmMaker`, `cinema` | `RunScript(service.webostv,picture_preset,cinema)` |
 | `command` | SSAP uri, optional JSON payload | `RunScript(service.webostv,command,ssap://system/getSystemInfo)` |
 | `status` | none | Shows connection, model, firmware |
 | `repair` | none | Forgets the key and re-prompts on the TV |
@@ -101,6 +102,19 @@ The service answers with a `reply` notification (`Other.reply` on the Kodi WebSo
 the same `id`: `{"id": "abc123", "ok": true, "result": ...}` or
 `{"id": "abc123", "ok": false, "error": "bad_request|disconnected|command_error", "message": "..."}`.
 
+## Picture presets and HDR rules
+
+`picture_preset` uses the alert-to-luna workaround (see `resources/lib/luna.py`). The TV never
+reports the result of that call, so the service reads the mode back and fails the action if the
+TV didn't apply it, e.g. for a name the TV doesn't offer.
+
+*Settings → Playback* (off by default): set a preset per HDR type (SDR, HDR10/HDR10+, HLG,
+Dolby Vision; empty = leave alone). When video starts, the service reads `VideoPlayer.HdrType`
+and applies the matching preset after a short delay (default 1.5 s), so a quick stop/start
+doesn't make the TV flip back and forth. When playback stops it restores the preset that was in use while
+Kodi was idle. The TV keeps separate picture memories for SDR and HDR signals, so the
+mode it reports at the instant playback starts isn't a safe restore target.
+
 ## Skin properties
 
 Published on `Window(Home)`; only changed values are written.
@@ -117,7 +131,7 @@ Published on `Window(Home)`; only changed values are written.
 | `WebOS.App` / `WebOS.AppTitle` | `netflix` / `Netflix` |
 | `WebOS.Input` / `WebOS.InputLabel` | `HDMI_2` / `Apple TV` |
 | `WebOS.SoundOutput` | `external_arc` |
-| `WebOS.PicturePreset` | (phase 2) |
+| `WebOS.PicturePreset` | `filmMaker` (live, includes changes from the LG remote) |
 
 Example: `$INFO[Window(Home).Property(WebOS.Volume)]`.
 

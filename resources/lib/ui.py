@@ -54,6 +54,7 @@ def run() -> None:
         (lang.INPUTS, choose_input),
         (lang.APPS, choose_app),
         (lang.SOUND_OUTPUT, choose_sound_output),
+        (lang.PICTURE_PRESET, choose_picture_preset),
         (lang.BUTTONS, remote),
         (lang.SEND_TOAST, send_toast),
         (lang.STATUS, status),
@@ -109,6 +110,26 @@ def choose_sound_output() -> None:
         _call("sound_output", [outputs[index]])
 
 
+# Names the settings service uses; the TV may not offer all of them.
+PICTURE_PRESETS = (
+    "filmMaker", "cinema", "expert1", "expert2", "normal", "vivid", "eco", "game", "sports",
+)
+
+
+def choose_picture_preset() -> None:
+    reply = _call("status")
+    if not reply:
+        return
+    current = reply["result"].get("picture_preset") or ""
+    presets = list(PICTURE_PRESETS)
+    if current and current not in presets:
+        presets.insert(0, current)
+    labels = [_mark(p, p == current) for p in presets]
+    index = _dialog().select(lang.get(lang.PICTURE_PRESET), labels)
+    if index >= 0:
+        _call("picture_preset", [presets[index]])
+
+
 def remote() -> None:
     last = 0
     while True:
@@ -152,6 +173,7 @@ def show_status(info: dict[str, Any]) -> None:
         f"App: {info.get('app') or '-'}",
         f"Input: {info.get('input') or '-'}",
         f"Sound output: {info.get('sound_output') or '-'}",
+        f"Picture preset: {info.get('picture_preset') or '-'}",
     ]
     _dialog().textviewer(lang.get(lang.STATUS), "\n".join(lines))
 

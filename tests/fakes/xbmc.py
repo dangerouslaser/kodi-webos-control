@@ -78,8 +78,20 @@ class Player:
     def __init__(self) -> None:
         pass
 
+    def onAVStarted(self) -> None:  # noqa: N802
+        pass
+
+    def onPlayBackStopped(self) -> None:  # noqa: N802
+        pass
+
+    def onPlayBackEnded(self) -> None:  # noqa: N802
+        pass
+
+    def onPlayBackError(self) -> None:  # noqa: N802
+        pass
+
     def isPlayingVideo(self) -> bool:  # noqa: N802
-        return False
+        return bool(info_labels.get("_playing_video"))
 
 
 def sleep(ms: int) -> None:

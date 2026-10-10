@@ -18,7 +18,7 @@ from aiowebostv import WebOsClient, WebOsTvCommandError, WebOsTvPairError
 from aiowebostv.buttons import BUTTONS
 
 from . import kodilog as log
-from . import discovery, storage, wol
+from . import discovery, luna, storage, wol
 from .errors import BadRequest, CommandFailed, Disconnected
 from .net import Backoff, discover_lan_ip
 from .pairing import KeyStore
@@ -29,6 +29,9 @@ RUNTIME_FILE = "runtime.json"
 IDENTITY_FILE = "tv.json"
 # Re-discovery runs at most this often while the TV is unreachable.
 DISCOVERY_INTERVAL = 120.0
+PICTURE_SETTINGS = "settings/getSystemSettings"
+PICTURE_QUERY = {"category": "picture", "keys": ["pictureMode"]}
+PRESET_VERIFY_TIMEOUT = 3.0
 CONNECTION_ERRORS = (OSError, TimeoutError, aiohttp.ClientError, WebOsTvCommandError)
 MEDIA_COMMANDS = {
     "play": "play",
@@ -86,6 +89,8 @@ class TvController:
         self._expected_uuid: str | None = None
         self._firmware: tuple[WebOsClient, str] | None = None
         self.picture_preset = ""
+        # Callbacks run with the new preset name (automations track it).
+        self.picture_listeners: list[Callable[[str], None]] = []
 
     # lifecycle -----------------------------------------------------------
 
@@ -243,6 +248,7 @@ class TvController:
         self._failure_notified = False
         log.info(f"connected to {host}")
         self._learn_mac(client)
+        await self._subscribe_picture(client)
         self._set_connected(True)
         if self.settings.toast_on_connect:
             self._notify("info", f"Connected to TV at {host}")
@@ -547,6 +553,72 @@ class TvController:
         uri = uri.removeprefix("ssap://")
         return await self._call("request", uri, payload)
 
+    # picture (phase 2) ---------------------------------------------------
+
+    async def _subscribe_picture(self, client: WebOsClient) -> None:
+        async def on_picture(payload: dict[str, Any]) -> None:
+            mode = str(((payload or {}).get("settings") or {}).get("pictureMode") or "")
+            if mode and mode != self.picture_preset:
+                self.picture_preset = mode
+                log.debug(f"picture mode is {mode}")
+                self._publish()
+                for listener in list(self.picture_listeners):
+                    try:
+                        listener(mode)
+                    except Exception as err:  # noqa: BLE001
+                        log.warning(f"picture listener failed: {err!r}")
+
+        try:
+            await client.subscribe(on_picture, PICTURE_SETTINGS, dict(PICTURE_QUERY))
+        except Exception as err:  # noqa: BLE001
+            log.warning(f"cannot follow picture mode: {err!r}")
+
+    async def get_picture_mode(self) -> str:
+        res = await self._call("request", PICTURE_SETTINGS, dict(PICTURE_QUERY))
+        mode = str((res.get("settings") or {}).get("pictureMode") or "")
+        if mode:
+            self.picture_preset = mode
+        return mode
+
+    async def set_picture_mode(self, mode: str) -> str:
+        """Set the picture mode and confirm the TV applied it."""
+        client = self._require()
+        mode = mode.strip()
+        if not mode:
+            raise BadRequest("missing picture preset")
+        if self.picture_preset == mode:
+            return mode
+
+        async def request(uri: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+            try:
+                return await client.request(uri, payload)
+            except WebOsTvCommandError as err:
+                raise CommandFailed(str(err)) from err
+
+        try:
+            await luna.set_picture_settings(request, {"pictureMode": mode})
+        except CommandFailed:
+            raise
+        except RuntimeError as err:
+            raise CommandFailed(str(err)) from err
+        except (OSError, aiohttp.ClientError) as err:
+            raise Disconnected(str(err)) from err
+
+        # The luna call reports nothing; read back until it sticks.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + PRESET_VERIFY_TIMEOUT
+        current = ""
+        while loop.time() < deadline:
+            current = await self.get_picture_mode()
+            if current == mode:
+                log.info(f"picture mode set to {mode}")
+                self._publish()
+                return mode
+            await asyncio.sleep(0.2)
+        error = f"TV did not apply picture preset {mode!r} (still {current!r})"
+        log.warning(error)
+        raise CommandFailed(error)
+
     async def firmware(self) -> str:
         """Firmware version string, cached per connection.
 
@@ -599,6 +671,7 @@ class TvController:
             "app": self.state.app_id,
             "input": self.state.input_id,
             "sound_output": self.state.sound_output,
+            "picture_preset": self.state.picture_preset,
         }
 
     def catalog(self) -> dict[str, Any]:

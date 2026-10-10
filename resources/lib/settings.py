@@ -19,6 +19,14 @@ class Settings:
     toast_on_connect: bool = False
     backoff_cap: float = 60.0
     debug: bool = False
+    # Phase 2: playback rules
+    rules_enabled: bool = False
+    preset_sdr: str = ""
+    preset_hdr10: str = ""
+    preset_hlg: str = ""
+    preset_dv: str = ""
+    restore_on_stop: bool = True
+    rules_debounce: float = 1.5
 
     @classmethod
     def load(cls, addon: xbmcaddon.Addon | None = None) -> Settings:
@@ -40,6 +48,13 @@ class Settings:
             toast_on_connect=addon.getSettingBool("toast_on_connect"),
             backoff_cap=number("backoff_cap", 60.0),
             debug=addon.getSettingBool("debug"),
+            rules_enabled=addon.getSettingBool("rules_enabled"),
+            preset_sdr=addon.getSetting("preset_sdr").strip(),
+            preset_hdr10=addon.getSetting("preset_hdr10").strip(),
+            preset_hlg=addon.getSetting("preset_hlg").strip(),
+            preset_dv=addon.getSetting("preset_dv").strip(),
+            restore_on_stop=addon.getSettingBool("restore_on_stop"),
+            rules_debounce=number("rules_debounce", 1.5),
         )
 
     @property

@@ -23,6 +23,7 @@ FIND_TV = 32113
 SEARCHING = 32114
 NO_TVS_FOUND = 32115
 TV_SELECTED = 32116
+PICTURE_PRESET = 32117
 
 _FALLBACK = {
     INPUTS: "Inputs",
@@ -42,6 +43,7 @@ _FALLBACK = {
     SEARCHING: "Searching the network for LG TVs...",
     NO_TVS_FOUND: "No LG webOS TVs found on the network",
     TV_SELECTED: "TV selected",
+    PICTURE_PRESET: "Picture preset",
 }
 
 

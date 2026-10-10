@@ -12,6 +12,13 @@ _DEFAULTS = {
     "toast_on_connect": "false",
     "backoff_cap": "60",
     "debug": "false",
+    "rules_enabled": "false",
+    "preset_sdr": "",
+    "preset_hdr10": "",
+    "preset_hlg": "",
+    "preset_dv": "",
+    "restore_on_stop": "true",
+    "rules_debounce": "1.5",
 }
 
 

@@ -163,6 +163,8 @@ ACTIONS: dict[str, Action] = {
                usage="play|pause|stop|rewind|fast_forward"),
         Action("channel", _parse_channel, lambda tv, kw: tv.channel(kw["value"]),
                usage="up|down|<channel id>"),
+        Action("picture_preset", _required_text("preset name"),
+               lambda tv, kw: tv.set_picture_mode(kw["value"]), usage="<preset name>"),
         Action("command", _parse_command, lambda tv, kw: tv.command(kw["uri"], kw["payload"]),
                returns_data=True, usage="ssap://<uri>[,<json payload>]"),
         Action("repair", _no_args, lambda tv, kw: tv.repair()),

@@ -48,6 +48,7 @@ class TvModel:
     muted: bool = False
     app_id: str = "org.xbmc.kodi"
     sound_output: str = "tv_speaker"
+    picture_mode: str = "filmMaker"
     inputs: list[dict[str, Any]] = field(default_factory=lambda: copy.deepcopy(DEFAULT_INPUTS))
     apps: list[dict[str, Any]] = field(default_factory=lambda: copy.deepcopy(DEFAULT_APPS))
 
@@ -98,6 +99,13 @@ class FakeTv:
         self._input_path = f"/input/{uuid.uuid4().hex}"
         self.fail_uris: dict[str, str] = {}
         self.uuid = str(uuid.uuid4())
+        # Set True to model firmware that ignores the alert->luna workaround.
+        self.luna_blocked = False
+        # Picture modes this fake TV accepts.
+        self.picture_modes = {"filmMaker", "cinema", "expert1", "vivid", "normal", "game"}
+        self._alerts: dict[str, dict[str, Any]] = {}
+        self._pending_pushes: list[str] = []
+        self.luna_calls: list[tuple[str, dict[str, Any]]] = []
 
     # lifecycle -----------------------------------------------------------
 
@@ -237,7 +245,9 @@ class FakeTv:
             self._subs.setdefault(uri, []).append((conn, uid))
             reply = {**reply, "subscribed": True}
         await conn.send(json.dumps({"type": "response", "id": uid, "payload": reply}))
-        for pushed in self._side_effects(uri):
+        pushes = self._side_effects(uri) + self._pending_pushes
+        self._pending_pushes = []
+        for pushed in pushes:
             await self._push(pushed)
 
     async def _register(self, conn: ServerConnection, msg: dict[str, Any]) -> None:
@@ -277,6 +287,9 @@ class FakeTv:
             "tv/getExternalInputList": {"devices": m.inputs, "returnValue": True},
             "com.webos.service.apiadapter/audio/getSoundOutput": {"soundOutput": m.sound_output, "returnValue": True},
             "com.webos.media/getForegroundAppInfo": {"foregroundAppInfo": [], "returnValue": True},
+            "settings/getSystemSettings": {
+                "category": "picture", "settings": {"pictureMode": m.picture_mode}, "returnValue": True,
+            },
         }
         return table.get(uri, {})
 
@@ -296,8 +309,20 @@ class FakeTv:
             "tv/getExternalInputList",
             "com.webos.service.apiadapter/audio/getSoundOutput",
             "com.webos.media/getForegroundAppInfo",
+            "settings/getSystemSettings",
         }:
             return self._payload(uri, payload)
+        if uri == "system.notifications/createAlert":
+            alert_id = f"alert-{uuid.uuid4().hex[:8]}"
+            self._alerts[alert_id] = payload
+            return {"alertId": alert_id, **ok}
+        if uri == "system.notifications/closeAlert":
+            alert = self._alerts.pop(payload.get("alertId"), None)
+            if alert is None:
+                return None
+            onclose = alert.get("onclose") or {}
+            self._luna(str(onclose.get("uri", "")), onclose.get("params") or {})
+            return ok
         if uri == "config/getConfigs":
             known = {"tv.nyx.firmwareVersion": "33.30.97", "tv.nyx.platformVersion": "10.3.0"}
             names = payload.get("configNames", [])
@@ -340,6 +365,21 @@ class FakeTv:
         if uri.startswith("media.controls/") or uri in ("tv/channelUp", "tv/channelDown", "tv/openChannel"):
             return ok
         return None
+
+    def _luna(self, uri: str, params: dict[str, Any]) -> None:
+        self.luna_calls.append((uri, params))
+        if self.luna_blocked:
+            return
+        if uri == "luna://com.webos.settingsservice/setSystemSettings" and params.get("category") == "picture":
+            mode = (params.get("settings") or {}).get("pictureMode")
+            if mode in self.picture_modes:
+                self.model.picture_mode = mode
+                self._pending_pushes.append("settings/getSystemSettings")
+
+    async def set_picture_mode(self, mode: str) -> None:
+        """Simulate the user (or an HDR signal) changing the picture mode."""
+        self.model.picture_mode = mode
+        await self._push("settings/getSystemSettings")
 
     def _side_effects(self, uri: str) -> list[str]:
         return {

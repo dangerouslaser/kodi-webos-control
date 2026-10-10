@@ -41,6 +41,27 @@ class _Monitor(xbmc.Monitor):
         self._service.reload_settings()
 
 
+class _Player(xbmc.Player):
+    """Forwards video playback events to the playback rules on the loop."""
+
+    def __init__(self, service: WebOsService) -> None:
+        super().__init__()
+        self._service = service
+
+    def onAVStarted(self) -> None:  # noqa: N802
+        if self.isPlayingVideo():
+            self._service.player_event("av_started", xbmc.getInfoLabel("VideoPlayer.HdrType"))
+
+    def onPlayBackStopped(self) -> None:  # noqa: N802
+        self._service.player_event("stopped")
+
+    def onPlayBackEnded(self) -> None:  # noqa: N802
+        self._service.player_event("stopped")
+
+    def onPlayBackError(self) -> None:  # noqa: N802
+        self._service.player_event("stopped")
+
+
 class WebOsService:
     def __init__(self) -> None:
         self.settings = Settings.load()
@@ -49,6 +70,8 @@ class WebOsService:
         self.controller: Any = None
         self.publisher: Any = None
         self.monitor: _Monitor | None = None
+        self.player: _Player | None = None
+        self.rules: Any = None
 
     # entry ---------------------------------------------------------------
 
@@ -72,6 +95,7 @@ class WebOsService:
         log.install_handler()
 
         # Lazy imports: only pay for aiowebostv/websockets once we know we run.
+        from .automations import PlaybackRules  # noqa: PLC0415
         from .state import PropertyPublisher  # noqa: PLC0415
         from .tv import TvController  # noqa: PLC0415
 
@@ -91,9 +115,11 @@ class WebOsService:
                 notify=self.notify,
             )
             await self.controller.start()
+            self.rules = PlaybackRules(self.controller, self.settings)
 
         self._submit(create()).result(timeout=5)
         self.monitor = _Monitor(self)
+        self.player = _Player(self)
         log.info(
             f"service started (host {self.settings.host}, "
             f"Python {sys.version.split()[0]}, "
@@ -110,6 +136,11 @@ class WebOsService:
         log.info("service stopping")
         if self.loop is None:
             return
+        if self.rules is not None:
+            try:
+                self._submit(self.rules.close()).result(timeout=SHUTDOWN_TIMEOUT)
+            except Exception:  # noqa: BLE001
+                pass
         if self.controller is not None:
             try:
                 self._submit(self.controller.stop()).result(timeout=SHUTDOWN_TIMEOUT)
@@ -121,6 +152,7 @@ class WebOsService:
         if self.publisher is not None:
             self.publisher.clear()
         self.monitor = None
+        self.player = None
         self.loop = None
 
     def _submit(self, coro: Any) -> Future:
@@ -135,8 +167,15 @@ class WebOsService:
         if settings == self.settings:
             return
         self.settings = settings
+        if self.rules is not None and self.loop is not None:
+            self.loop.call_soon_threadsafe(self.rules.update, settings)
         if self.controller is not None:
             self._submit(self.controller.reconfigure(settings))
+
+    def player_event(self, event: str, *args: Any) -> None:
+        if self.loop is None or self.rules is None:
+            return
+        self.loop.call_soon_threadsafe(getattr(self.rules, event), *args)
 
     def handle_request(self, request: dict[str, Any]) -> Future | None:
         if self.loop is None or self.controller is None:

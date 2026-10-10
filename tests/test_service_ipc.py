@@ -174,8 +174,8 @@ def test_settings_change_reconnects(running):
 
 def test_ui_input_and_status_flow(running):
     _service, tv = running
-    # Main menu -> Inputs (0) -> "Apple TV" (1) -> main menu -> Status (5) -> cancel
-    xbmcgui.select_answers.extend([0, 1, 5, -1])
+    # Main menu -> Inputs (0) -> "Apple TV" (1) -> main menu -> Status (6) -> cancel
+    xbmcgui.select_answers.extend([0, 1, 6, -1])
     script.main(["default.py"])
     wait_until(lambda: tv.model.app_id == "com.webos.app.hdmi2")
     heading, labels = xbmcgui.selects[1]
@@ -185,11 +185,29 @@ def test_ui_input_and_status_flow(running):
 
 def test_ui_remote_sends_buttons(running):
     _service, tv = running
-    # Main menu -> Remote (3) -> HOME (0) -> BACK (1) -> back out -> cancel
-    xbmcgui.select_answers.extend([3, 0, 1, -1, -1])
+    # Main menu -> Remote (4) -> HOME (0) -> BACK (1) -> back out -> cancel
+    xbmcgui.select_answers.extend([4, 0, 1, -1, -1])
     script.main(["default.py", "ui"])
     wait_until(lambda: tv.buttons == ["HOME", "BACK"])
 
 
 def test_service_saves_learned_mac_to_settings(running):
     assert xbmcaddon.settings["mac"] == "58:96:0A:00:00:01"
+
+
+def test_picture_preset_action_and_player_hook(running):
+    service, tv = running
+    reply = ipc.call("picture_preset", ["cinema"])
+    assert reply["ok"] and reply["result"] == "cinema"
+    wait_until(lambda: xbmcgui.Window(10000).getProperty("WebOS.PicturePreset") == "cinema")
+
+    # Enable rules via settings and drive the Kodi player hook.
+    ipc.call("picture_preset", ["filmMaker"])
+    xbmcaddon.settings.update({"rules_enabled": "true", "preset_hdr10": "expert1",
+                               "rules_debounce": "0.5"})
+    service.reload_settings()
+    xbmc.info_labels.update({"_playing_video": "1", "VideoPlayer.HdrType": "hdr10"})
+    service.player.onAVStarted()
+    wait_until(lambda: tv.model.picture_mode == "expert1")
+    service.player.onPlayBackStopped()
+    wait_until(lambda: tv.model.picture_mode == "filmMaker")

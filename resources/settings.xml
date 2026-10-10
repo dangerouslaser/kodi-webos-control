@@ -80,6 +80,90 @@
         </setting>
       </group>
     </category>
+    <category id="playback" label="32030" help="">
+      <group id="1">
+        <setting id="rules_enabled" type="boolean" label="32031" help="32081">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="preset_sdr" type="string" label="32032" help="32082">
+          <level>0</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>32032</heading>
+          </control>
+        </setting>
+        <setting id="preset_hdr10" type="string" label="32033" help="32082">
+          <level>0</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>32033</heading>
+          </control>
+        </setting>
+        <setting id="preset_hlg" type="string" label="32034" help="32082">
+          <level>0</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>32034</heading>
+          </control>
+        </setting>
+        <setting id="preset_dv" type="string" label="32035" help="32082">
+          <level>0</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="edit" format="string">
+            <heading>32035</heading>
+          </control>
+        </setting>
+        <setting id="restore_on_stop" type="boolean" label="32036" help="32086">
+          <level>0</level>
+          <default>true</default>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="toggle"/>
+        </setting>
+        <setting id="rules_debounce" type="number" label="32037" help="32087">
+          <level>2</level>
+          <default>1.5</default>
+          <constraints>
+            <minimum>0.5</minimum>
+            <step>0.5</step>
+            <maximum>10</maximum>
+          </constraints>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="slider" format="number">
+            <popup>false</popup>
+          </control>
+        </setting>
+      </group>
+    </category>
     <category id="pairing" label="32020" help="">
       <group id="1">
         <setting id="repair" type="action" label="32021" help="32071">
