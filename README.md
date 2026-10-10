@@ -108,6 +108,11 @@ the same `id`: `{"id": "abc123", "ok": true, "result": ...}` or
 reports the result of that call, so the service reads the mode back and fails the action if the
 TV didn't apply it, e.g. for a name the TV doesn't offer.
 
+Preset names come from the TV (`settings/getSystemSettingDesc`). webOS keeps a separate set per
+signal type: SDR names are bare (`cinema`, `filmMaker`, `expert1`), HDR10/HLG names start with
+`hdr` (`hdrCinema`), Dolby Vision names with `dolbyHdr` (`dolbyHdrCinema`). The *Choose…* buttons
+in settings and the *Picture preset* menu item list only the presets valid for that type.
+
 *Settings → Playback* (off by default): set a preset per HDR type (SDR, HDR10/HDR10+, HLG,
 Dolby Vision; empty = leave alone). When video starts, the service reads `VideoPlayer.HdrType`
 and applies the matching preset after a short delay (default 1.5 s), so a quick stop/start

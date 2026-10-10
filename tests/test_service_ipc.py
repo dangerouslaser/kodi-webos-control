@@ -211,3 +211,45 @@ def test_picture_preset_action_and_player_hook(running):
     wait_until(lambda: tv.model.picture_mode == "expert1")
     service.player.onPlayBackStopped()
     wait_until(lambda: tv.model.picture_mode == "filmMaker")
+
+
+def test_choose_rule_preset_from_tv_list(running):
+    # "Choose HDR10 preset" button: list shows only HDR presets from the TV.
+    xbmcgui.select_answers.append(1)  # 0 = No change, 1 = first HDR preset
+    script.main(["default.py", "choose_preset", "hdr10"])
+    heading, labels = xbmcgui.selects[-1]
+    assert labels == ["No change  [current]", "Cinema (HDR)", "Filmmaker Mode (HDR)"]
+    assert xbmcaddon.settings["preset_hdr10"] == "hdrCinema"
+    assert xbmc.builtins[-1] == "Addon.OpenSettings(service.webostv)"
+
+    # Picking "No change" clears it.
+    xbmcgui.select_answers.append(0)
+    script.main(["default.py", "choose_preset", "hdr10"])
+    assert xbmcaddon.settings["preset_hdr10"] == ""
+
+
+def test_menu_picture_preset_lists_current_signal_presets(running):
+    _service, tv = running
+    # Main menu -> Picture preset (3) -> pick "Cinema" -> cancel
+    xbmcgui.select_answers.extend([3])
+    labels_holder = {}
+
+    import resources.lib.ui as ui
+
+    real_select = xbmcgui.Dialog.select
+
+    def select(self, heading, items, *a, **k):
+        if heading == "Picture preset":
+            labels_holder["labels"] = list(items)
+            return items.index("Cinema")
+        return real_select(self, heading, items, *a, **k)
+
+    xbmcgui.Dialog.select = select
+    try:
+        xbmcgui.select_answers.append(-1)
+        ui.run()
+    finally:
+        xbmcgui.Dialog.select = real_select
+    assert "Filmmaker Mode  [current]" in labels_holder["labels"]
+    assert not any("(HDR)" in label for label in labels_holder["labels"])
+    wait_until(lambda: tv.model.picture_mode == "cinema")

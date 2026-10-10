@@ -100,6 +100,16 @@
             <heading>32032</heading>
           </control>
         </setting>
+        <setting id="choose_preset_sdr" type="action" label="32040" help="32088">
+          <level>0</level>
+          <data>RunScript(service.webostv,choose_preset,sdr)</data>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
         <setting id="preset_hdr10" type="string" label="32033" help="32082">
           <level>0</level>
           <default/>
@@ -111,6 +121,16 @@
           </dependencies>
           <control type="edit" format="string">
             <heading>32033</heading>
+          </control>
+        </setting>
+        <setting id="choose_preset_hdr10" type="action" label="32041" help="32088">
+          <level>0</level>
+          <data>RunScript(service.webostv,choose_preset,hdr10)</data>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="button" format="action">
+            <close>true</close>
           </control>
         </setting>
         <setting id="preset_hlg" type="string" label="32034" help="32082">
@@ -126,6 +146,16 @@
             <heading>32034</heading>
           </control>
         </setting>
+        <setting id="choose_preset_hlg" type="action" label="32042" help="32088">
+          <level>0</level>
+          <data>RunScript(service.webostv,choose_preset,hlg)</data>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
         <setting id="preset_dv" type="string" label="32035" help="32082">
           <level>0</level>
           <default/>
@@ -137,6 +167,16 @@
           </dependencies>
           <control type="edit" format="string">
             <heading>32035</heading>
+          </control>
+        </setting>
+        <setting id="choose_preset_dv" type="action" label="32043" help="32088">
+          <level>0</level>
+          <data>RunScript(service.webostv,choose_preset,dolbyvision)</data>
+          <dependencies>
+            <dependency type="enable" setting="rules_enabled">true</dependency>
+          </dependencies>
+          <control type="button" format="action">
+            <close>true</close>
           </control>
         </setting>
         <setting id="restore_on_stop" type="boolean" label="32036" help="32086">

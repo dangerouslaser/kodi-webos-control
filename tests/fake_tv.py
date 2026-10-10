@@ -102,7 +102,8 @@ class FakeTv:
         # Set True to model firmware that ignores the alert->luna workaround.
         self.luna_blocked = False
         # Picture modes this fake TV accepts.
-        self.picture_modes = {"filmMaker", "cinema", "expert1", "vivid", "normal", "game"}
+        self.picture_modes = {"filmMaker", "cinema", "expert1", "vivid", "normal", "game",
+                              "hdrCinema", "hdrFilmMaker", "dolbyHdrCinema"}
         self._alerts: dict[str, dict[str, Any]] = {}
         self._pending_pushes: list[str] = []
         self.luna_calls: list[tuple[str, dict[str, Any]]] = []
@@ -312,6 +313,12 @@ class FakeTv:
             "settings/getSystemSettings",
         }:
             return self._payload(uri, payload)
+        if uri == "settings/getSystemSettingDesc":
+            sdr = {"filmMaker", "cinema", "expert1", "vivid", "normal", "game"}
+            values = [{"active": True, "value": v, "visible": v in sdr}
+                      for v in sorted(self.picture_modes)]
+            return {"results": [{"key": "pictureMode", "category": "picture",
+                                 "values": {"arrayExt": values}}], **ok}
         if uri == "system.notifications/createAlert":
             alert_id = f"alert-{uuid.uuid4().hex[:8]}"
             self._alerts[alert_id] = payload

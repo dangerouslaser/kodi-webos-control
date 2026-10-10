@@ -137,6 +137,10 @@ async def _catalog(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any]:
     return tv.catalog()
 
 
+async def _picture_modes(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any]:
+    return {"modes": await tv.picture_modes(), "current": tv.state.picture_preset}
+
+
 ACTIONS: dict[str, Action] = {
     a.name: a
     for a in (
@@ -170,11 +174,12 @@ ACTIONS: dict[str, Action] = {
         Action("repair", _no_args, lambda tv, kw: tv.repair()),
         Action("status", _no_args, _status, returns_data=True),
         Action("catalog", _no_args, _catalog, returns_data=True),
+        Action("picture_modes", _no_args, _picture_modes, returns_data=True),
     )
 }
 
 # Handled by default.py itself, never sent to the service.
-LOCAL_ACTIONS = {"ui", "find_tv"}
+LOCAL_ACTIONS = {"ui", "find_tv", "choose_preset"}
 
 
 def parse(name: str, args: list[Any]) -> tuple[Action, dict[str, Any]]:

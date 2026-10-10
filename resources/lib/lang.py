@@ -24,6 +24,7 @@ SEARCHING = 32114
 NO_TVS_FOUND = 32115
 TV_SELECTED = 32116
 PICTURE_PRESET = 32117
+NO_CHANGE = 32118
 
 _FALLBACK = {
     INPUTS: "Inputs",
@@ -44,6 +45,7 @@ _FALLBACK = {
     NO_TVS_FOUND: "No LG webOS TVs found on the network",
     TV_SELECTED: "TV selected",
     PICTURE_PRESET: "Picture preset",
+    NO_CHANGE: "No change",
 }
 
 

@@ -573,6 +573,26 @@ class TvController:
         except Exception as err:  # noqa: BLE001
             log.warning(f"cannot follow picture mode: {err!r}")
 
+    async def picture_modes(self) -> list[dict[str, Any]]:
+        """Picture modes the TV knows, from getSystemSettingDesc.
+
+        Each item: {"value", "visible"}; "visible" means selectable for the
+        current signal (SDR names while showing SDR, and so on).
+        """
+        res = await self._call(
+            "request", "settings/getSystemSettingDesc",
+            {"category": "picture", "keys": ["pictureMode"]},
+        )
+        modes = []
+        for result in res.get("results") or []:
+            if result.get("key") != "pictureMode":
+                continue
+            values = (result.get("values") or {}).get("arrayExt") or []
+            for item in values:
+                if isinstance(item, dict) and item.get("value") and item.get("active", True):
+                    modes.append({"value": str(item["value"]), "visible": bool(item.get("visible"))})
+        return modes
+
     async def get_picture_mode(self) -> str:
         res = await self._call("request", PICTURE_SETTINGS, dict(PICTURE_QUERY))
         mode = str((res.get("settings") or {}).get("pictureMode") or "")

@@ -207,7 +207,7 @@ msgid "When a video starts, switch the TV picture preset to the one set for its 
 msgstr ""
 
 msgctxt "#32082"
-msgid "TV picture preset name, e.g. filmMaker, cinema, expert1, expert2, normal, vivid, game, sports. Leave empty to leave the preset alone."
+msgid "TV picture preset name. Use the Choose button below to pick from the TV's list. HDR presets start with hdr, Dolby Vision presets with dolbyHdr. Leave empty to leave the preset alone."
 msgstr ""
 
 msgctxt "#32086"
@@ -220,4 +220,28 @@ msgstr ""
 
 msgctxt "#32117"
 msgid "Picture preset"
+msgstr ""
+
+msgctxt "#32040"
+msgid "Choose SDR preset..."
+msgstr ""
+
+msgctxt "#32041"
+msgid "Choose HDR10 preset..."
+msgstr ""
+
+msgctxt "#32042"
+msgid "Choose HLG preset..."
+msgstr ""
+
+msgctxt "#32043"
+msgid "Choose Dolby Vision preset..."
+msgstr ""
+
+msgctxt "#32088"
+msgid "Pick from the presets the TV offers for this type."
+msgstr ""
+
+msgctxt "#32118"
+msgid "No change"
 msgstr ""

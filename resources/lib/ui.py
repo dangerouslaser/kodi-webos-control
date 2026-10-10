@@ -110,24 +110,45 @@ def choose_sound_output() -> None:
         _call("sound_output", [outputs[index]])
 
 
-# Names the settings service uses; the TV may not offer all of them.
-PICTURE_PRESETS = (
-    "filmMaker", "cinema", "expert1", "expert2", "normal", "vivid", "eco", "game", "sports",
-)
-
-
 def choose_picture_preset() -> None:
-    reply = _call("status")
+    """Pick a preset valid for what the TV is showing right now."""
+    from . import presets  # noqa: PLC0415
+
+    reply = _call("picture_modes")
     if not reply:
         return
-    current = reply["result"].get("picture_preset") or ""
-    presets = list(PICTURE_PRESETS)
-    if current and current not in presets:
-        presets.insert(0, current)
-    labels = [_mark(p, p == current) for p in presets]
+    current = reply["result"].get("current") or ""
+    values = [m["value"] for m in reply["result"].get("modes", []) if m.get("visible")]
+    if not values:
+        return
+    labels = [_mark(presets.label(v), v == current) for v in values]
     index = _dialog().select(lang.get(lang.PICTURE_PRESET), labels)
     if index >= 0:
-        _call("picture_preset", [presets[index]])
+        _call("picture_preset", [values[index]])
+
+
+def choose_rule_preset(kind: str) -> None:
+    """Settings button: pick the preset a playback rule applies."""
+    from . import presets  # noqa: PLC0415
+
+    kind = kind.strip().lower()
+    setting_id = presets.SETTING_IDS.get(kind)
+    if setting_id is None:
+        return
+    reply = _call("picture_modes")
+    if not reply:
+        return
+    values = presets.for_kind(kind, [m["value"] for m in reply["result"].get("modes", [])])
+    addon = xbmcaddon.Addon("service.webostv")
+    current = addon.getSetting(setting_id)
+    options = [""] + values
+    labels = [_mark(lang.get(lang.NO_CHANGE), current == "")] + [
+        _mark(presets.label(v), v == current) for v in values
+    ]
+    index = _dialog().select(lang.get(lang.PICTURE_PRESET), labels)
+    if index >= 0:
+        addon.setSetting(setting_id, options[index])
+    xbmc.executebuiltin("Addon.OpenSettings(service.webostv)")
 
 
 def remote() -> None:

@@ -163,3 +163,25 @@ async def test_idle_mode_tracks_user_changes_between_sessions(tv, controller):
     rules.stopped()
     await wait_for(lambda: tv.model.picture_mode == "vivid")
     await rules.close()
+
+
+def test_preset_grouping_and_labels():
+    from resources.lib import presets
+
+    values = ["filmMaker", "cinema", "hdrCinema", "hdrCinemaBright", "dolbyHdrCinema", "expert2"]
+    assert presets.for_kind("sdr", values) == ["filmMaker", "cinema", "expert2"]
+    assert presets.for_kind("hdr10", values) == ["hdrCinema", "hdrCinemaBright"]
+    assert presets.for_kind("hlg", values) == ["hdrCinema", "hdrCinemaBright"]
+    assert presets.for_kind("dolbyvision", values) == ["dolbyHdrCinema"]
+    assert presets.label("filmMaker") == "Filmmaker Mode"
+    assert presets.label("hdrCinemaBright") == "Cinema Home (HDR)"
+    assert presets.label("dolbyHdrCinema") == "Cinema (Dolby Vision)"
+    assert presets.label("expert2") == "Expert (Dark room)"
+    assert presets.label("dolbyHdrSomethingNew") == "Something new (Dolby Vision)"
+
+
+async def test_picture_modes_from_tv(tv, controller):
+    modes = await controller.picture_modes()
+    values = {m["value"]: m["visible"] for m in modes}
+    assert values["filmMaker"] is True
+    assert values["hdrCinema"] is False
