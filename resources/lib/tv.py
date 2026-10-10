@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aiohttp
@@ -18,7 +18,7 @@ from aiowebostv import WebOsClient, WebOsTvCommandError, WebOsTvPairError
 from aiowebostv.buttons import BUTTONS
 
 from . import kodilog as log
-from . import storage, wol
+from . import discovery, storage, wol
 from .errors import BadRequest, CommandFailed, Disconnected
 from .net import Backoff, discover_lan_ip
 from .pairing import KeyStore
@@ -26,6 +26,9 @@ from .settings import Settings
 from .state import TvState
 
 RUNTIME_FILE = "runtime.json"
+IDENTITY_FILE = "tv.json"
+# Re-discovery runs at most this often while the TV is unreachable.
+DISCOVERY_INTERVAL = 120.0
 CONNECTION_ERRORS = (OSError, TimeoutError, aiohttp.ClientError, WebOsTvCommandError)
 MEDIA_COMMANDS = {
     "play": "play",
@@ -47,6 +50,8 @@ class TvController:
         keystore: KeyStore | None = None,
         on_state: Callable[[TvState], None] | None = None,
         on_mac: Callable[[str], None] | None = None,
+        on_host: Callable[[str], None] | None = None,
+        discover: Callable[[], Awaitable[list[discovery.DiscoveredTv]]] = discovery.discover,
         notify: Callable[[str, str], None] | None = None,
         client_factory: Callable[..., WebOsClient] = WebOsClient,
         lan_ip: Callable[[], str | None] = discover_lan_ip,
@@ -57,6 +62,11 @@ class TvController:
         self._on_state = on_state or (lambda _s: None)
         # on_mac(mac): persist a MAC the TV reported (setting was empty).
         self._on_mac = on_mac or (lambda _m: None)
+        # on_host(host): persist a host found by discovery to settings.
+        self._on_host = on_host or (lambda _h: None)
+        self._discover = discover
+        self._last_discovery: float | None = None
+        self._multi_tv_notified = False
         # notify(kind, message): kind is "info" or "error"; the service maps
         # it to a Kodi notification.
         self._notify = notify or (lambda _k, _m: None)
@@ -73,6 +83,7 @@ class TvController:
         self._task: asyncio.Task | None = None
         self._failure_notified = False
         self._had_key = False
+        self._expected_uuid: str | None = None
         self._firmware: tuple[WebOsClient, str] | None = None
         self.picture_preset = ""
 
@@ -106,6 +117,8 @@ class TvController:
             log.info(f"host changed {old.host} -> {settings.host}; reconnecting")
             storage.write_json(RUNTIME_FILE, {})
             self.pairing_blocked = False
+            self._last_discovery = None
+            self._multi_tv_notified = False
             await self._disconnect_client()
             self._backoff.reset()
             self._wake.set()
@@ -113,7 +126,7 @@ class TvController:
     async def repair(self) -> None:
         """Forget the stored key and reconnect (shows the TV prompt once)."""
         log.info("re-pair requested; deleting stored client key")
-        self.keystore.delete(self.settings.host)
+        self._forget_key()
         self.pairing_blocked = False
         self._failure_notified = False
         await self._disconnect_client()
@@ -184,6 +197,10 @@ class TvController:
                 continue
             self._remember_host(host)
             return True
+        if not self.pairing_blocked and await self._try_discovery():
+            return True
+        if self.pairing_blocked:
+            return False
         if not self._failure_notified:
             self._failure_notified = True
             if self.settings.toast_on_connect:
@@ -191,9 +208,14 @@ class TvController:
         self._set_connected(False)
         return False
 
-    async def _connect(self, host: str) -> None:
+    async def _connect(self, host: str, uuid: str | None = None) -> None:
         await self._disconnect_client()
-        key = self.keystore.get(self.settings.host)
+        # A key follows the TV's UUID, so a TV picked with Find TV or found
+        # at a new IP reuses its pairing instead of prompting again.
+        self._expected_uuid = uuid or discovery.hinted_uuid(host)
+        key = self.keystore.get(self.settings.host) or (
+            self.keystore.get_uuid(self._expected_uuid) if self._expected_uuid else None
+        )
         self._had_key = key is not None
         self.active_host = host
         client = self._client_factory(
@@ -205,9 +227,19 @@ class TvController:
         if not await client.connect():
             # disconnect() raced the attempt (re-pair, settings change, stop)
             raise ConnectionError("connect cancelled")
+        tv_uuid = str(client.tv_info.hello.get("deviceUUID") or "").lower()
+        if uuid and tv_uuid and tv_uuid != uuid.lower():
+            await self._disconnect_client()
+            error = f"{host} is a different TV ({tv_uuid})"
+            raise ConnectionError(error)
         if client.client_key and client.client_key != key:
-            self.keystore.set(self.settings.host, client.client_key)
             log.info("pairing accepted; client key stored")
+        if client.client_key:
+            self.keystore.set(self.settings.host, client.client_key)
+            if tv_uuid:
+                self.keystore.set_uuid(tv_uuid, client.client_key)
+        if tv_uuid:
+            storage.write_json(IDENTITY_FILE, {"host": self.settings.host, "uuid": tv_uuid})
         self._failure_notified = False
         log.info(f"connected to {host}")
         self._learn_mac(client)
@@ -238,9 +270,98 @@ class TvController:
             and not client.client_key
         )
 
+    def _forget_key(self) -> None:
+        self.keystore.delete(self.settings.host)
+        for uuid in {self._known_uuid(), self._expected_uuid, discovery.hinted_uuid(self.settings.host)}:
+            if uuid:
+                self.keystore.delete(f"uuid:{uuid.lower()}")
+
+    def _known_uuid(self) -> str | None:
+        """UUID of the TV last connected for the configured host."""
+        identity = storage.read_json(IDENTITY_FILE, {}) or {}
+        if identity.get("host") == self.settings.host and identity.get("uuid"):
+            return str(identity["uuid"])
+        return None
+
+    async def _try_discovery(self) -> bool:
+        """Find the TV with SSDP when the configured host is unreachable.
+
+        - Known TV (UUID recorded): accept only a TV with that UUID, at a
+          new IP, and reuse its key; never prompts on another TV.
+        - First run (default loopback host, nothing ever paired): accept a
+          single discovered TV; its pairing prompt is the confirmation.
+        On success the new host is written to settings.
+        """
+        if not self.settings.auto_discover:
+            return False
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        if self._last_discovery is not None and now - self._last_discovery < DISCOVERY_INTERVAL:
+            return False
+        self._last_discovery = now
+
+        known = self._known_uuid()
+        first_run = self.settings.is_loopback and self.keystore.is_empty()
+        if not known and not first_run:
+            return False
+
+        found = await self._discover()
+        if found:
+            discovery.remember(found)
+        if known:
+            matches = [tv for tv in found if tv.uuid == known.lower()]
+            target = next((tv for tv in matches if tv.host != self.active_host), None)
+            if target is None:
+                log.debug(f"discovery: paired TV {known} not found at a new address")
+                return False
+            log.info(f"paired TV found at new address {target.host}")
+        else:
+            if len(found) != 1:
+                if len(found) > 1 and not self._multi_tv_notified:
+                    self._multi_tv_notified = True
+                    self._notify("info", f"Found {len(found)} TVs; choose one with Find TV in settings")
+                log.info(f"discovery found {len(found)} TVs; not choosing automatically")
+                return False
+            target = found[0]
+            log.info(f"discovered {target.name} at {target.host}; pairing")
+
+        try:
+            await self._connect(target.host, uuid=target.uuid)
+        except WebOsTvPairError as err:
+            self._handle_pair_error(err)
+            return False
+        except asyncio.CancelledError:
+            raise
+        except CONNECTION_ERRORS as err:
+            if self._pairing_timed_out():
+                self._block_pairing("Pairing timed out on the TV")
+            else:
+                log.debug(f"connect to discovered {target.host} failed: {err!r}")
+            return False
+        self._adopt_host(target.host)
+        return True
+
+    def _adopt_host(self, host: str) -> None:
+        """Make a discovered host the configured one, keeping the key."""
+        old = self.settings.host
+        key = self.client.client_key if self.client else None
+        self.settings = dataclasses.replace(self.settings, host=host)
+        if key:
+            self.keystore.set(host, key)
+        identity = storage.read_json(IDENTITY_FILE, {}) or {}
+        if identity.get("uuid"):
+            storage.write_json(IDENTITY_FILE, {"host": host, "uuid": identity["uuid"]})
+        storage.write_json(RUNTIME_FILE, {})
+        log.info(f"host setting updated {old} -> {host}")
+        try:
+            self._on_host(host)
+        except Exception as err:  # noqa: BLE001
+            log.warning(f"could not save host setting: {err!r}")
+        self._publish()
+
     def _handle_pair_error(self, err: WebOsTvPairError) -> None:
         if self._had_key:
-            self.keystore.delete(self.settings.host)
+            self._forget_key()
             self._block_pairing("Stored pairing key was rejected; use Re-pair")
         else:
             self._block_pairing(f"Pairing declined ({err})")

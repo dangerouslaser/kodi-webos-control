@@ -19,7 +19,10 @@ def main(argv: list[str]) -> None:
     if not args or args[0].strip().lower() in actions.LOCAL_ACTIONS:
         from . import ui  # noqa: PLC0415
 
-        ui.run()
+        if args and args[0].strip().lower() == "find_tv":
+            ui.find_tv()
+        else:
+            ui.run()
         return
     run_action(args[0], args[1:])
 

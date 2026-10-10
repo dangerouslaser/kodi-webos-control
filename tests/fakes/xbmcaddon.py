@@ -6,6 +6,7 @@ settings: dict[str, str] = {}
 _DEFAULTS = {
     "host": "127.0.0.1",
     "loopback_fallback": "true",
+    "auto_discover": "true",
     "mac": "",
     "connect_timeout": "10",
     "toast_on_connect": "false",

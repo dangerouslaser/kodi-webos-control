@@ -187,3 +187,11 @@ async def test_shim_message_iteration_and_receive_timeout():
         with pytest.raises(TimeoutError):
             await ws.receive_json(timeout=0.05)
         await session.close()
+
+
+async def test_guard_blocks_non_loopback_connections():
+    # conftest's autouse guard: tests must never reach a real TV.
+    session = aiohttp.ClientSession()
+    with pytest.raises(AssertionError, match="non-loopback"):
+        await session.ws_connect("wss://192.0.2.1:3001")
+    await session.close()

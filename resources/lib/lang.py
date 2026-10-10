@@ -19,6 +19,10 @@ NOT_RUNNING = 32109
 CURRENT = 32110
 COMMAND_RESULT = 32111
 ACTION_FAILED = 32112
+FIND_TV = 32113
+SEARCHING = 32114
+NO_TVS_FOUND = 32115
+TV_SELECTED = 32116
 
 _FALLBACK = {
     INPUTS: "Inputs",
@@ -34,6 +38,10 @@ _FALLBACK = {
     CURRENT: "current",
     COMMAND_RESULT: "SSAP response",
     ACTION_FAILED: "Action failed",
+    FIND_TV: "Find TV",
+    SEARCHING: "Searching the network for LG TVs...",
+    NO_TVS_FOUND: "No LG webOS TVs found on the network",
+    TV_SELECTED: "TV selected",
 }
 
 

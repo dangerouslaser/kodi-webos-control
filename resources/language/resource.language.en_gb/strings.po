@@ -137,3 +137,35 @@ msgstr ""
 msgctxt "#32112"
 msgid "Action failed"
 msgstr ""
+
+msgctxt "#32005"
+msgid "Find the TV automatically"
+msgstr ""
+
+msgctxt "#32006"
+msgid "Find TV on the network"
+msgstr ""
+
+msgctxt "#32055"
+msgid "If the TV can't be reached, search the network for it. Finds a new TV on first run, and follows a paired TV to a new IP address."
+msgstr ""
+
+msgctxt "#32056"
+msgid "Search the network for LG webOS TVs and pick one."
+msgstr ""
+
+msgctxt "#32113"
+msgid "Find TV"
+msgstr ""
+
+msgctxt "#32114"
+msgid "Searching the network for LG TVs..."
+msgstr ""
+
+msgctxt "#32115"
+msgid "No LG webOS TVs found on the network"
+msgstr ""
+
+msgctxt "#32116"
+msgid "TV selected"
+msgstr ""

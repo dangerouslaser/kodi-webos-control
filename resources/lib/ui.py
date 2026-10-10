@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
+import xbmc
+import xbmcaddon
 import xbmcgui
 
 from . import ipc, lang
@@ -54,6 +57,7 @@ def run() -> None:
         (lang.BUTTONS, remote),
         (lang.SEND_TOAST, send_toast),
         (lang.STATUS, status),
+        (lang.FIND_TV, find_tv),
         (lang.REPAIR, repair),
     )
     while True:
@@ -155,3 +159,31 @@ def show_status(info: dict[str, Any]) -> None:
 def repair() -> None:
     if _call("repair"):
         _dialog().notification(ADDON_NAME, lang.get(lang.REPAIR_STARTED))
+
+
+def find_tv() -> None:
+    """Search the LAN, let the user pick a TV, and save it as the host."""
+    from . import discovery  # noqa: PLC0415
+
+    _dialog().notification(ADDON_NAME, lang.get(lang.SEARCHING), xbmcgui.NOTIFICATION_INFO, 3000)
+    xbmc.executebuiltin("ActivateWindow(busydialognocancel)")
+    try:
+        found = asyncio.run(discovery.discover())
+    finally:
+        xbmc.executebuiltin("Dialog.Close(busydialognocancel)")
+    if not found:
+        _dialog().ok(lang.get(lang.FIND_TV), lang.get(lang.NO_TVS_FOUND))
+        return
+    discovery.remember(found)
+    addon = xbmcaddon.Addon("service.webostv")
+    current = addon.getSetting("host")
+    labels = [_mark(tv.label, tv.host == current) for tv in found]
+    index = _dialog().select(lang.get(lang.FIND_TV), labels)
+    if index < 0:
+        return
+    tv = found[index]
+    if tv.host != current:
+        # The service reconnects on the settings change; a TV paired before
+        # is recognised by UUID and doesn't prompt again.
+        addon.setSetting("host", tv.host)
+    _dialog().notification(ADDON_NAME, f"{lang.get(lang.TV_SELECTED)}: {tv.name}")

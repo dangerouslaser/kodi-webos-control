@@ -26,6 +26,17 @@ Build a zip and install it from Kodi (*Add-ons → Install from zip file*):
 python3 scripts/build_zip.py   # -> dist/service.webostv-<version>.zip
 ```
 
+Finding the TV:
+
+- **Automatic:** with the default host (`127.0.0.1`) and nothing paired yet, if nothing answers
+  locally the service searches the network (SSDP). If exactly one webOS TV answers, it connects,
+  the TV shows the pairing prompt, and the TV's address is saved as the host.
+- **Find TV:** *Settings → Connection → Find TV on the network* (or *Find TV* in the program
+  UI) lists the TVs on the network; picking one sets the host.
+- **Address changes:** if the saved address stops answering, the service searches (at most every
+  2 minutes) for the TV with the same device UUID and moves to its new address, reusing the
+  pairing key. It never connects to a different TV this way.
+
 On first start the TV shows a pairing prompt; accept it. If the MAC address setting is empty, the service fills it in from
 the TV's own report (wired preferred) so `power_on` via Wake-on-LAN works without typing it. The key is stored in
 `special://profile/addon_data/service.webostv/client_key.json`, never in settings.

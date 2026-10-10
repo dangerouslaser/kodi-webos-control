@@ -18,6 +18,18 @@
           <default>true</default>
           <control type="toggle"/>
         </setting>
+        <setting id="auto_discover" type="boolean" label="32005" help="32055">
+          <level>0</level>
+          <default>true</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="find_tv" type="action" label="32006" help="32056">
+          <level>0</level>
+          <data>RunScript(service.webostv,find_tv)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
         <setting id="mac" type="string" label="32003" help="32053">
           <level>0</level>
           <default/>

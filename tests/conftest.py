@@ -33,6 +33,24 @@ def kodi(tmp_path, monkeypatch):
     return xbmc
 
 
+@pytest.fixture(autouse=True)
+def no_real_network(monkeypatch):
+    """Tests may only open WebSockets to loopback; never to a real TV."""
+    from urllib.parse import urlparse
+
+    import aiohttp
+
+    real = aiohttp.ClientSession.ws_connect
+
+    async def guarded(self, url, **kwargs):
+        host = urlparse(url).hostname or ""
+        if not (host.startswith("127.") or host in ("localhost", "::1")):
+            raise AssertionError(f"test tried to connect to non-loopback host {url}")
+        return await real(self, url, **kwargs)
+
+    monkeypatch.setattr(aiohttp.ClientSession, "ws_connect", guarded)
+
+
 @pytest.fixture(scope="session")
 def tls_cert(tmp_path_factory):
     if shutil.which("openssl") is None:
@@ -48,10 +66,10 @@ def patch_ports(monkeypatch):
     from aiowebostv import webos_client
 
     def apply(tv):
-        # A port nothing listens on gives "connection refused" for ws.
+        # A port nothing listens on gives "connection refused". Always patch
+        # both ports so the wss fallback can never reach a real TV on 3001.
         monkeypatch.setattr(webos_client, "WS_PORT", tv.ws_port or _closed_port())
-        if tv.wss_port:
-            monkeypatch.setattr(webos_client, "WSS_PORT", tv.wss_port)
+        monkeypatch.setattr(webos_client, "WSS_PORT", tv.wss_port or _closed_port())
 
     return apply
 

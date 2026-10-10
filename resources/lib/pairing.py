@@ -1,7 +1,8 @@
 """Client-key storage, keyed by the configured TV host.
 
 The key lives in addon_data/client_key.json, never in settings.xml, so
-settings exports and screenshots don't leak it.
+settings exports and screenshots don't leak it. Keys are also stored
+under "uuid:<deviceUUID>" so they follow the TV to a new IP address.
 """
 
 from __future__ import annotations
@@ -33,3 +34,13 @@ class KeyStore:
         del keys[host]
         storage.write_json(KEY_FILE, keys)
         return True
+
+    def get_uuid(self, uuid: str) -> str | None:
+        return self.get(f"uuid:{uuid.lower()}")
+
+    def set_uuid(self, uuid: str, key: str) -> None:
+        self.set(f"uuid:{uuid.lower()}", key)
+
+    def is_empty(self) -> bool:
+        keys = storage.read_json(KEY_FILE, {})
+        return not (isinstance(keys, dict) and keys)

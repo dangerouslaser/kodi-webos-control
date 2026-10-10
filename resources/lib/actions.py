@@ -172,7 +172,7 @@ ACTIONS: dict[str, Action] = {
 }
 
 # Handled by default.py itself, never sent to the service.
-LOCAL_ACTIONS = {"ui"}
+LOCAL_ACTIONS = {"ui", "find_tv"}
 
 
 def parse(name: str, args: list[Any]) -> tuple[Action, dict[str, Any]]:

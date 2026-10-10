@@ -13,6 +13,7 @@ ADDON_ID = "service.webostv"
 class Settings:
     host: str = "127.0.0.1"
     loopback_fallback: bool = True
+    auto_discover: bool = True
     mac: str = ""
     connect_timeout: float = 10.0
     toast_on_connect: bool = False
@@ -33,6 +34,7 @@ class Settings:
         return cls(
             host=(addon.getSetting("host") or "127.0.0.1").strip(),
             loopback_fallback=addon.getSettingBool("loopback_fallback"),
+            auto_discover=addon.getSettingBool("auto_discover"),
             mac=addon.getSetting("mac").strip(),
             connect_timeout=number("connect_timeout", 10.0),
             toast_on_connect=addon.getSettingBool("toast_on_connect"),

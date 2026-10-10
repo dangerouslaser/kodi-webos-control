@@ -87,6 +87,7 @@ class WebOsService:
                 self.settings,
                 on_state=self.publisher.publish,
                 on_mac=self.save_mac,
+                on_host=self.save_host,
                 notify=self.notify,
             )
             await self.controller.start()
@@ -171,6 +172,10 @@ class WebOsService:
     def save_mac(self, mac: str) -> None:
         """Persist a learned MAC (triggers onSettingsChanged -> reload)."""
         xbmcaddon.Addon(ADDON_ID).setSetting("mac", mac)
+
+    def save_host(self, host: str) -> None:
+        """Persist a host found by discovery (no reconnect: already there)."""
+        xbmcaddon.Addon(ADDON_ID).setSetting("host", host)
 
     def notify(self, kind: str, message: str) -> None:
         icon = xbmcgui.NOTIFICATION_ERROR if kind == "error" else xbmcgui.NOTIFICATION_INFO

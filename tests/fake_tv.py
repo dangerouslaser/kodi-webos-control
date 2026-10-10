@@ -97,6 +97,7 @@ class FakeTv:
         self._subs: dict[str, list[tuple[ServerConnection, Any]]] = {}
         self._input_path = f"/input/{uuid.uuid4().hex}"
         self.fail_uris: dict[str, str] = {}
+        self.uuid = str(uuid.uuid4())
 
     # lifecycle -----------------------------------------------------------
 
@@ -192,7 +193,10 @@ class FakeTv:
             await conn.send(json.dumps({
                 "type": "hello",
                 "id": uid,
-                "payload": {"protocolVersion": 1, "deviceType": "tv", "deviceOS": "webOS"},
+                "payload": {
+                    "protocolVersion": 1, "deviceType": "tv", "deviceOS": "webOS",
+                    "deviceUUID": self.uuid,
+                },
             }))
             return
         if mtype == "register":
@@ -350,3 +354,76 @@ class FakeTv:
             "com.webos.service.tvpower/power/turnOffScreen": ["com.webos.service.tvpower/power/getPowerState"],
             "com.webos.service.tvpower/power/turnOnScreen": ["com.webos.service.tvpower/power/getPowerState"],
         }.get(uri, [])
+
+
+class FakeSsdp:
+    """Answers SSDP M-SEARCH on a unicast port, plus a description server.
+
+    ``devices`` maps a reported host to (uuid, friendlyName, modelNumber).
+    Responses come from 127.0.0.1, so the reported host is put in a custom
+    header the tests read back via ``source_override``.
+    """
+
+    def __init__(self, uuid_: str, name: str = "[LG] webOS TV OLED77FAKE",
+                 model: str = "OLED77FAKE.AUS", *, extra_noise: bool = True) -> None:
+        self.uuid = uuid_
+        self.name = name
+        self.model = model
+        self.extra_noise = extra_noise
+        self.port: int | None = None
+        self.searches = 0
+        self._transport: Any = None
+        self._http: Any = None
+        self._http_port: int | None = None
+
+    async def start(self) -> None:
+        import asyncio
+
+        self._http = await asyncio.start_server(self._serve_description, "127.0.0.1", 0)
+        self._http_port = self._http.sockets[0].getsockname()[1]
+        loop = asyncio.get_running_loop()
+        outer = self
+
+        class Proto(asyncio.DatagramProtocol):
+            def connection_made(self, transport):
+                self.transport = transport
+
+            def datagram_received(self, data, addr):
+                if b"M-SEARCH" not in data:
+                    return
+                outer.searches += 1
+                if outer.extra_noise:
+                    # A Hue-bridge style responder that answers everything.
+                    self.transport.sendto(
+                        b"HTTP/1.1 200 OK\r\nST: upnp:rootdevice\r\n"
+                        b"USN: uuid:2f402f80-0000::upnp:rootdevice\r\n\r\n", addr)
+                body = (
+                    "HTTP/1.1 200 OK\r\n"
+                    f"Location: http://127.0.0.1:{outer._http_port}/\r\n"
+                    f"USN: uuid:{outer.uuid}::urn:lge-com:service:webos-second-screen:1\r\n"
+                    "ST: urn:lge-com:service:webos-second-screen:1\r\n\r\n"
+                )
+                self.transport.sendto(body.encode(), addr)
+
+        self._transport, _ = await loop.create_datagram_endpoint(Proto, local_addr=("127.0.0.1", 0))
+        self.port = self._transport.get_extra_info("sockname")[1]
+
+    async def _serve_description(self, reader, writer) -> None:
+        await reader.readuntil(b"\r\n\r\n")
+        xml = (
+            "<?xml version=\"1.0\"?><root><device>"
+            f"<friendlyName>{self.name}</friendlyName>"
+            f"<modelNumber>{self.model}</modelNumber>"
+            f"<UDN>uuid:{self.uuid}</UDN></device></root>"
+        ).encode()
+        writer.write(b"HTTP/1.0 200 OK\r\nContent-Type: text/xml\r\n"
+                     + f"Content-Length: {len(xml)}\r\n\r\n".encode() + xml)
+        await writer.drain()
+        writer.close()
+
+    async def stop(self) -> None:
+        if self._transport is not None:
+            self._transport.close()
+        if self._http is not None:
+            self._http.close()
+            await self._http.wait_closed()
