@@ -341,3 +341,39 @@ async def test_app_title_falls_back_to_input_label(tv):
         assert home.getProperty("WebOS.AppTitle") == "HDMI 3"
     finally:
         await controller.stop()
+
+
+async def test_learns_mac_when_setting_empty(tv):
+    saved = []
+    controller, _ = make_controller(on_mac=saved.append)
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected)
+        assert saved == ["58:96:0A:00:00:01"]  # wired preferred, upper-cased
+        assert controller.settings.mac == "58:96:0A:00:00:01"
+    finally:
+        await controller.stop()
+
+
+async def test_keeps_configured_mac(tv):
+    saved = []
+    controller, _ = make_controller(
+        Settings(host="127.0.0.1", loopback_fallback=False, mac="AA:BB:CC:DD:EE:FF"),
+        on_mac=saved.append,
+    )
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected)
+        assert saved == []
+        assert controller.settings.mac == "AA:BB:CC:DD:EE:FF"
+    finally:
+        await controller.stop()
+
+
+def test_reported_mac_picks_valid_wired_then_wifi():
+    from resources.lib.tv import reported_mac
+
+    assert reported_mac({"wiredInfo": {"macAddress": "bad"},
+                         "wifiInfo": {"macAddress": "e0:85:4d:0f:fe:d6"}}) == "E0:85:4D:0F:FE:D6"
+    assert reported_mac({}) == ""
+    assert reported_mac(None) == ""

@@ -26,7 +26,8 @@ Build a zip and install it from Kodi (*Add-ons → Install from zip file*):
 python3 scripts/build_zip.py   # -> dist/service.webostv-<version>.zip
 ```
 
-On first start the TV shows a pairing prompt; accept it. The key is stored in
+On first start the TV shows a pairing prompt; accept it. If the MAC address setting is empty, the service fills it in from
+the TV's own report (wired preferred) so `power_on` via Wake-on-LAN works without typing it. The key is stored in
 `special://profile/addon_data/service.webostv/client_key.json`, never in settings.
 
 ## Actions

@@ -189,3 +189,7 @@ def test_ui_remote_sends_buttons(running):
     xbmcgui.select_answers.extend([3, 0, 1, -1, -1])
     script.main(["default.py", "ui"])
     wait_until(lambda: tv.buttons == ["HOME", "BACK"])
+
+
+def test_service_saves_learned_mac_to_settings(running):
+    assert xbmcaddon.settings["mac"] == "58:96:0A:00:00:01"

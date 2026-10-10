@@ -260,7 +260,11 @@ class FakeTv:
             "com.webos.service.update/getCurrentSWInformation": {
                 "product_name": "webOSTV 23", "major_ver": "03", "minor_ver": "30.50", "returnValue": True,
             },
-            "com.webos.service.connectionmanager/getinfo": {"wifiInfo": {}, "returnValue": True},
+            "com.webos.service.connectionmanager/getinfo": {
+                "wifiInfo": {"macAddress": "E0:85:4D:00:00:02"},
+                "wiredInfo": {"macAddress": "58:96:0a:00:00:01"},
+                "returnValue": True,
+            },
             "com.webos.service.tvpower/power/getPowerState": {"state": m.power, "returnValue": True},
             "com.webos.applicationManager/getForegroundAppInfo": {"appId": m.app_id, "returnValue": True},
             "audio/getStatus": {"mute": m.muted, "volume": m.volume, "returnValue": True},

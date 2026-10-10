@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 from collections.abc import Callable
 from typing import Any
 
@@ -45,6 +46,7 @@ class TvController:
         *,
         keystore: KeyStore | None = None,
         on_state: Callable[[TvState], None] | None = None,
+        on_mac: Callable[[str], None] | None = None,
         notify: Callable[[str, str], None] | None = None,
         client_factory: Callable[..., WebOsClient] = WebOsClient,
         lan_ip: Callable[[], str | None] = discover_lan_ip,
@@ -53,6 +55,8 @@ class TvController:
         self.settings = settings
         self.keystore = keystore or KeyStore()
         self._on_state = on_state or (lambda _s: None)
+        # on_mac(mac): persist a MAC the TV reported (setting was empty).
+        self._on_mac = on_mac or (lambda _m: None)
         # notify(kind, message): kind is "info" or "error"; the service maps
         # it to a Kodi notification.
         self._notify = notify or (lambda _k, _m: None)
@@ -206,9 +210,24 @@ class TvController:
             log.info("pairing accepted; client key stored")
         self._failure_notified = False
         log.info(f"connected to {host}")
+        self._learn_mac(client)
         self._set_connected(True)
         if self.settings.toast_on_connect:
             self._notify("info", f"Connected to TV at {host}")
+
+    def _learn_mac(self, client: WebOsClient) -> None:
+        """Fill the MAC setting from the TV's own report, if it's empty."""
+        if self.settings.mac:
+            return
+        mac = reported_mac(client.tv_info.connection)
+        if not mac:
+            return
+        log.info(f"learned TV MAC address {mac}")
+        self.settings = dataclasses.replace(self.settings, mac=mac)
+        try:
+            self._on_mac(mac)
+        except Exception as err:  # noqa: BLE001
+            log.warning(f"could not save MAC address: {err!r}")
 
     def _pairing_timed_out(self) -> bool:
         client = self.client
@@ -472,3 +491,15 @@ class TvController:
             "current_app": self.state.app_id,
             "sound_output": self.state.sound_output,
         }
+
+
+def reported_mac(connection: dict[str, Any] | None) -> str:
+    """Pick the MAC from connectionmanager/getinfo, preferring wired."""
+    for key in ("wiredInfo", "wifiInfo"):
+        mac = ((connection or {}).get(key) or {}).get("macAddress", "")
+        try:
+            wol.parse_mac(mac)
+        except ValueError:
+            continue
+        return mac.upper()
+    return ""

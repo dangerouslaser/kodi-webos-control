@@ -13,6 +13,7 @@ from concurrent.futures import Future
 from typing import Any
 
 import xbmc
+import xbmcaddon
 import xbmcgui
 
 from . import bootstrap, ipc
@@ -20,6 +21,7 @@ from . import kodilog as log
 from .errors import ActionError, BadRequest
 from .settings import Settings
 
+ADDON_ID = "service.webostv"
 ADDON_NAME = "LG webOS TV"
 SHUTDOWN_TIMEOUT = 2.0
 
@@ -82,7 +84,10 @@ class WebOsService:
             # WebOsClient calls get_running_loop() in __init__, so the
             # controller (which builds clients) is created on the loop.
             self.controller = TvController(
-                self.settings, on_state=self.publisher.publish, notify=self.notify
+                self.settings,
+                on_state=self.publisher.publish,
+                on_mac=self.save_mac,
+                notify=self.notify,
             )
             await self.controller.start()
 
@@ -162,6 +167,10 @@ class WebOsService:
             self.notify("error", f"{name}: {reply['message']}")
         ipc.notify_all(ipc.REPLY, reply)
         return reply
+
+    def save_mac(self, mac: str) -> None:
+        """Persist a learned MAC (triggers onSettingsChanged -> reload)."""
+        xbmcaddon.Addon(ADDON_ID).setSetting("mac", mac)
 
     def notify(self, kind: str, message: str) -> None:
         icon = xbmcgui.NOTIFICATION_ERROR if kind == "error" else xbmcgui.NOTIFICATION_INFO
