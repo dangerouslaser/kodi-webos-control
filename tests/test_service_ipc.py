@@ -161,6 +161,26 @@ def test_shutdown_is_fast(patch_ports):
     tvt.close()
 
 
+def test_shutdown_makes_no_gui_calls_and_leaves_no_threads(patch_ports):
+    # Kodi stops services while holding its add-on manager lock; a window
+    # property write during shutdown can deadlock it (see shutdown()).
+    xbmcaddon.settings["loopback_fallback"] = "false"
+    tvt = TvThread()
+    tvt.tv.runner = tvt
+    patch_ports(tvt.tv)
+    before = {t.ident for t in threading.enumerate()}
+    service = WebOsService()
+    service.start()
+    wait_until(lambda: service.controller.connected)
+    xbmcgui.writes.clear()
+    service.shutdown()
+    assert xbmcgui.writes == []
+    left = [t for t in threading.enumerate()
+            if t.ident not in before and t.is_alive() and not t.name.startswith("faketv")]
+    tvt.close()
+    assert left == []
+
+
 def service_thread_alive(service):
     return service.thread is not None and service.thread.is_alive()
 
@@ -465,3 +485,72 @@ def test_plugin_lists_apps_with_cached_icons_and_launches(running, icon_server):
     wait_until(lambda: tv.model.app_id == "netflix")
     plugin.main(["plugin://service.webostv/", "-1", "?action=input&id=HDMI_2"])
     wait_until(lambda: tv.model.app_id == "com.webos.app.hdmi2")
+
+
+def test_player_hook_sends_content_and_frame_rate(running):
+    service, tv = running
+    xbmcaddon.settings.update({"sound_livetv": "2", "motion_video": "4", "rules_debounce": "0.5"})
+    service.reload_settings()
+    xbmc.info_labels.update({"_playing_video": "1", "VideoPlayer.HdrType": "",
+                             "Player.Process(videofps)": "50.00"})
+    xbmc.conditions["PVR.IsPlayingTV"] = True
+    service.player.onAVStarted()
+    wait_until(lambda: tv.model.sound_output == "external_arc")
+    wait_until(lambda: tv.model.motion.get("filmMaker") == "smooth")
+    service.player.onPlayBackStopped()
+    wait_until(lambda: tv.model.sound_output == "tv_speaker")
+
+
+def test_player_hook_music_skips_picture_rules(running):
+    service, tv = running
+    xbmcaddon.settings.update({"sound_music": "5", "motion_film": "1", "rules_debounce": "0.5"})
+    service.reload_settings()
+    xbmc.info_labels.update({"_playing_audio": "1"})
+    service.player.onAVStarted()
+    wait_until(lambda: tv.model.sound_output == "headphone")
+    assert tv.model.motion == {}
+    assert service.rules._session is False
+
+
+def test_osd_menu(running):
+    _service, tv = running
+    from resources.lib import ui
+
+    xbmcgui.select_answers.extend([1, 3])  # Motion smoothing -> Smooth, then back out
+    ui.run_page("osd")
+    assert tv.model.motion == {"filmMaker": "smooth"}
+    heading, labels = xbmcgui.selects[0]
+    assert heading == "LG TV"
+    assert labels[0] == "Picture preset: Filmmaker Mode"
+    assert labels[1] == "Motion smoothing"
+    assert labels[2] == "OLED pixel brightness: 80"
+    assert labels[3] == "HDR dynamic tone mapping: On"
+    assert labels[4] == "Noise reduction: Off"
+    assert labels[9] == "Sound output: TV speaker"
+    assert labels[10] == "Screen off"
+    assert xbmcgui.selects[1][1][3] == "Smooth"
+    # Back in the menu, showing what was set.
+    assert xbmcgui.selects[2][1][1] == "Motion smoothing: Smooth"
+
+
+def test_osd_quick_pick_sets_a_picture_setting(running):
+    _service, tv = running
+    from resources.lib import ui
+
+    xbmcgui.select_answers.extend([4, 2])  # Noise reduction -> Medium, then back out
+    ui.run_page("osd")
+    assert tv.model.picture["filmMaker"]["noiseReduction"] == "medium"
+    heading, labels = xbmcgui.selects[1]
+    assert heading == "Noise reduction"
+    assert labels == ["Off  [current]", "Low", "Medium", "High", "Auto"]
+    assert xbmcgui.selects[2][1][4] == "Noise reduction: Medium"
+
+
+def test_player_hook_passes_video_height(running):
+    service, tv = running
+    xbmcaddon.settings.update({"quality_sd": "3", "rules_debounce": "0.5"})
+    service.reload_settings()
+    xbmc.info_labels.update({"_playing_video": "1", "VideoPlayer.HdrType": "",
+                             "Player.Process(videoheight)": "576"})
+    service.player.onAVStarted()
+    wait_until(lambda: tv.model.picture.get("filmMaker", {}).get("superResolution") == "medium")

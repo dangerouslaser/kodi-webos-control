@@ -49,6 +49,14 @@ class TvModel:
     app_id: str = "org.xbmc.kodi"
     sound_output: str = "tv_speaker"
     picture_mode: str = "filmMaker"
+    # TruMotion per picture mode (real TVs keep one per mode and won't report it).
+    motion: dict[str, str] = field(default_factory=dict)
+    # Other picture settings per picture mode: {mode: {key: value}}.
+    picture: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def picture_value(self, key: str) -> Any:
+        defaults = {"backlight": 80, "hdrDynamicToneMapping": "on", "eyeComfortMode": "off"}
+        return self.picture.get(self.picture_mode, {}).get(key, defaults.get(key, "off"))
     inputs: list[dict[str, Any]] = field(default_factory=lambda: copy.deepcopy(DEFAULT_INPUTS))
     apps: list[dict[str, Any]] = field(default_factory=lambda: copy.deepcopy(DEFAULT_APPS))
 
@@ -273,6 +281,8 @@ class FakeTv:
 
     def _payload(self, uri: str, _payload: dict[str, Any]) -> dict[str, Any]:
         m = self.model
+        keys = (_payload or {}).get("keys") or ["pictureMode"]
+        picture = {k: m.picture_mode if k == "pictureMode" else m.picture_value(k) for k in keys}
         table: dict[str, dict[str, Any]] = {
             "system/getSystemInfo": {"modelName": "OLED65FAKE", "returnValue": True},
             "com.webos.service.update/getCurrentSWInformation": {
@@ -292,7 +302,7 @@ class FakeTv:
             "com.webos.service.apiadapter/audio/getSoundOutput": {"soundOutput": m.sound_output, "returnValue": True},
             "com.webos.media/getForegroundAppInfo": {"foregroundAppInfo": [], "returnValue": True},
             "settings/getSystemSettings": {
-                "category": "picture", "settings": {"pictureMode": m.picture_mode}, "returnValue": True,
+                "category": "picture", "settings": picture, "returnValue": True,
             },
         }
         return table.get(uri, {})
@@ -381,7 +391,13 @@ class FakeTv:
         if self.luna_blocked:
             return
         if uri == "luna://com.webos.settingsservice/setSystemSettings" and params.get("category") == "picture":
-            mode = (params.get("settings") or {}).get("pictureMode")
+            settings = params.get("settings") or {}
+            if "truMotionMode" in settings:
+                self.model.motion[self.model.picture_mode] = settings["truMotionMode"]
+            other = {k: v for k, v in settings.items() if k not in ("truMotionMode", "pictureMode")}
+            if other:
+                self.model.picture.setdefault(self.model.picture_mode, {}).update(other)
+            mode = settings.get("pictureMode")
             if mode in self.picture_modes:
                 self.model.picture_mode = mode
                 self._pending_pushes.append("settings/getSystemSettings")

@@ -91,3 +91,6 @@ def fast_picture_rules(monkeypatch):
 
     monkeypatch.setattr(automations, "SIGNAL_SETTLE", 0.2)
     monkeypatch.setattr(automations, "RETRY_DELAY", 0.05)
+    from resources.lib import soundrules
+
+    monkeypatch.setattr(soundrules, "RESTORE_DELAY", 0.1)

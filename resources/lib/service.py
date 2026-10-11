@@ -24,7 +24,7 @@ from .settings import Settings
 
 ADDON_ID = "service.webostv"
 ADDON_NAME = "LG webOS TV"
-SHUTDOWN_TIMEOUT = 2.0
+SHUTDOWN_TIMEOUT = 1.0
 LOCK_FILE = "service.lock"
 
 
@@ -44,7 +44,7 @@ class _Monitor(xbmc.Monitor):
 
 
 class _Player(xbmc.Player):
-    """Forwards video playback events to the playback rules on the loop."""
+    """Forwards playback events to the playback and sound rules on the loop."""
 
     def __init__(self, service: WebOsService) -> None:
         super().__init__()
@@ -52,7 +52,11 @@ class _Player(xbmc.Player):
 
     def onAVStarted(self) -> None:  # noqa: N802
         if self.isPlayingVideo():
-            self._service.player_event("av_started", xbmc.getInfoLabel("VideoPlayer.HdrType"))
+            content = "livetv" if xbmc.getCondVisibility("PVR.IsPlayingTV") else "video"
+            hdr = xbmc.getInfoLabel("VideoPlayer.HdrType")
+            self._service.player_event("av_started", content, hdr, _video_fps(), _video_height())
+        elif self.isPlayingAudio():
+            self._service.player_event("av_started", "music")
 
     def onPlayBackStopped(self) -> None:  # noqa: N802
         self._service.player_event("stopped")
@@ -62,6 +66,20 @@ class _Player(xbmc.Player):
 
     def onPlayBackError(self) -> None:  # noqa: N802
         self._service.player_event("stopped")
+
+
+def _video_fps() -> float:
+    try:
+        return float(xbmc.getInfoLabel("Player.Process(videofps)") or 0)
+    except ValueError:
+        return 0.0
+
+
+def _video_height() -> int:
+    try:
+        return int(float(xbmc.getInfoLabel("Player.Process(videoheight)") or 0))
+    except ValueError:
+        return 0
 
 
 def _log_task_error(task: Any) -> None:
@@ -97,12 +115,12 @@ class _KodiSide:
         xbmc.executebuiltin("ShutDown()")
 
     def set_overlay(self, active: bool) -> None:
-        # The "home" action (another process) reads this.
-        window = xbmcgui.Window(10000)
-        if active:
-            window.setProperty("WebOS.TransparentControl", "true")
-        else:
-            window.clearProperty("WebOS.TransparentControl")
+        if not self._service.closing:
+            window = xbmcgui.Window(10000)
+            if active:
+                window.setProperty("WebOS.TransparentControl", "true")
+            else:
+                window.clearProperty("WebOS.TransparentControl")
         if self._service.overlay is not None:
             self._service.overlay.set_active(active)
 
@@ -120,11 +138,13 @@ class WebOsService:
         self.monitor: _Monitor | None = None
         self.player: _Player | None = None
         self.rules: Any = None
+        self.sound: Any = None
         self.watcher: Any = None
         self._inputs: tuple = ()
         self._launcher_key: tuple = ()
         self._lock_fd: int | None = None
         self.overlay: Any = None
+        self.closing = False
 
     # entry ---------------------------------------------------------------
 
@@ -155,6 +175,7 @@ class WebOsService:
         # Lazy imports: only pay for aiowebostv/websockets once we know we run.
         from .automations import PlaybackRules  # noqa: PLC0415
         from .remote import Overlay  # noqa: PLC0415
+        from .soundrules import SoundRules  # noqa: PLC0415
         from .state import PropertyPublisher  # noqa: PLC0415
         from .tv import TvController  # noqa: PLC0415
         from .watcher import TvWatcher  # noqa: PLC0415
@@ -177,6 +198,7 @@ class WebOsService:
             )
             await self.controller.start()
             self.rules = PlaybackRules(self.controller, self.settings)
+            self.sound = SoundRules(self.controller, self.settings)
             self.watcher = TvWatcher(self.controller, self.settings, _KodiSide(self))
 
         self._submit(create()).result(timeout=5)
@@ -219,10 +241,21 @@ class WebOsService:
         self.loop.run_forever()
 
     def shutdown(self) -> None:
+        """Stop without touching Kodi's GUI.
+
+        Kodi stops a service (disable, update) while holding its add-on
+        manager lock, and the skin's System.HasAddon/Addon.Setting* checks
+        need that lock while the GUI lock is held. Window property writes
+        take the GUI lock, so one here can deadlock Kodi for good. The
+        WebOS.* properties stay until the next start overwrites them.
+        """
         log.info("service stopping")
+        self.closing = True
+        if self.publisher is not None:
+            self.publisher.close()
         if self.loop is None:
             return
-        for part in (self.watcher, self.rules):
+        for part in (self.watcher, self.rules, self.sound):
             if part is None:
                 continue
             try:
@@ -236,11 +269,15 @@ class WebOsService:
                 self._submit(self.controller.stop()).result(timeout=SHUTDOWN_TIMEOUT)
             except Exception as err:  # noqa: BLE001
                 log.warning(f"controller stop did not finish cleanly: {err!r}")
+        # getaddrinfo runs in the default executor; its worker thread is not
+        # a daemon, and Kodi waits for it (then kills the script after 5 s).
+        try:
+            self._submit(self.loop.shutdown_default_executor()).result(timeout=SHUTDOWN_TIMEOUT)
+        except Exception:  # noqa: BLE001
+            pass
         self.loop.call_soon_threadsafe(self.loop.stop)
         if self.thread is not None:
             self.thread.join(SHUTDOWN_TIMEOUT)
-        if self.publisher is not None:
-            self.publisher.clear()
         self._release_instance_lock()
         self.monitor = None
         self.player = None
@@ -276,6 +313,9 @@ class WebOsService:
         """WebOS.Rule.<kind>: friendly name of each HDR rule preset (skins)."""
         from .presets import label  # noqa: PLC0415
 
+        if self.closing:
+            return
+
         window = xbmcgui.Window(10000)
         s = self.settings
         # Kodi's input, with the TV's name for it when known.
@@ -304,7 +344,7 @@ class WebOsService:
         self.settings = settings
         self.publish_setting_labels()
         if self.loop is not None:
-            for part in (self.rules, self.watcher):
+            for part in (self.rules, self.sound, self.watcher):
                 if part is not None:
                     self.loop.call_soon_threadsafe(part.update, settings)
             # Someone is changing settings in Kodi's UI, so the TV is
@@ -314,12 +354,22 @@ class WebOsService:
         if self.controller is not None:
             self._submit(self.controller.reconfigure(settings))
 
-    def player_event(self, event: str, *args: Any) -> None:
+    def player_event(self, event: str, content: str = "", hdr: str = "", fps: float = 0.0,
+                     height: int = 0) -> None:
         if self.loop is None or self.rules is None:
             return
-        self.loop.call_soon_threadsafe(getattr(self.rules, event), *args)
-        if event == "av_started" and self.watcher is not None:
-            self.loop.call_soon_threadsafe(self.watcher.video_started)
+        call = self.loop.call_soon_threadsafe
+        if event == "av_started":
+            if content != "music":
+                call(self.rules.av_started, hdr, fps, content, height)
+                if self.watcher is not None:
+                    call(self.watcher.video_started)
+            if self.sound is not None:
+                call(self.sound.started, content)
+            return
+        call(getattr(self.rules, event))
+        if self.sound is not None:
+            call(self.sound.stopped)
 
     def forward(self, name: str, args: list[Any]) -> None:
         """Run an action for transparent control; no reply, errors logged."""

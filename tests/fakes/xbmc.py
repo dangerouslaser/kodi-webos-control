@@ -95,6 +95,9 @@ class Player:
     def isPlayingVideo(self) -> bool:  # noqa: N802
         return bool(info_labels.get("_playing_video"))
 
+    def isPlayingAudio(self) -> bool:  # noqa: N802
+        return bool(info_labels.get("_playing_audio"))
+
 
 def sleep(ms: int) -> None:
     time.sleep(ms / 1000)

@@ -177,6 +177,19 @@ async def _picture_modes(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any
             "readable": tv.picture_readable is not False}
 
 
+def _parse_picture_setting(args: list[str]) -> dict[str, Any]:
+    if len(args) != 2:
+        raise BadRequest("usage: picture_setting <key> <value>")
+    return {"key": str(args[0]).strip(), "value": str(args[1]).strip()}
+
+
+async def _picture_settings(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any]:
+    from .adjustments import ADJUSTMENTS  # noqa: PLC0415
+
+    values = await tv.picture_settings(tuple(ADJUSTMENTS))
+    return {"values": values, "readable": tv.picture_readable is not False}
+
+
 ACTIONS: dict[str, Action] = {
     a.name: a
     for a in (
@@ -205,6 +218,11 @@ ACTIONS: dict[str, Action] = {
                usage="up|down|<channel id>"),
         Action("picture_preset", _required_text("preset name"),
                lambda tv, kw: tv.set_picture_mode(kw["value"]), usage="<preset name>"),
+        Action("picture_setting", _parse_picture_setting,
+               lambda tv, kw: tv.set_picture_setting(kw["key"], kw["value"]), usage="<key> <value>"),
+        Action("picture_settings", _no_args, _picture_settings, returns_data=True),
+        Action("motion", _choice("off", "cinemaClear", "natural", "smooth"),
+               lambda tv, kw: tv.set_motion(kw["value"]), usage="off|cinemaClear|natural|smooth"),
         Action("command", _parse_command, lambda tv, kw: tv.command(kw["uri"], kw["payload"]),
                returns_data=True, usage="ssap://<uri>[,<json payload>]"),
         Action("repair", _no_args, lambda tv, kw: tv.repair()),

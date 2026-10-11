@@ -30,6 +30,10 @@ FROM_START = 32307
 KODI_INPUT = 32308
 AUTOMATIC = 32309
 VOLUME = 32310
+MOTION = 32430
+LG_TV = 32431
+SCREEN_OFF = 32432
+MOTION_LABELS = {"off": 32411, "cinemaClear": 32412, "natural": 32413, "smooth": 32414}
 
 _FALLBACK = {
     INPUTS: "Inputs",
@@ -56,6 +60,27 @@ _FALLBACK = {
     KODI_INPUT: "Kodi's TV input",
     AUTOMATIC: "Automatic",
     VOLUME: "Volume",
+    MOTION: "Motion smoothing",
+    LG_TV: "LG TV",
+    SCREEN_OFF: "Screen off",
+    32500: "OLED pixel brightness",
+    32501: "HDR dynamic tone mapping",
+    32502: "Noise reduction",
+    32503: "MPEG noise reduction",
+    32504: "Smooth gradation",
+    32505: "Super resolution",
+    32506: "Eye comfort mode",
+    32510: "Off",
+    32511: "On",
+    32512: "Low",
+    32513: "Medium",
+    32514: "High",
+    32515: "Auto",
+    32516: "HGIG",
+    32411: "Off",
+    32412: "Cinematic Movement",
+    32413: "Natural",
+    32414: "Smooth",
 }
 
 

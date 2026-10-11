@@ -80,12 +80,15 @@ Every action works the same from `RunScript`, keymaps, skin buttons, and JSON-RP
 | `media` | `play`, `pause`, `stop`, `rewind`, `fast_forward` | `RunScript(service.webostv,media,pause)` |
 | `channel` | `up`, `down`, or channel id | `RunScript(service.webostv,channel,up)` |
 | `picture_preset` | preset name, e.g. `filmMaker`, `cinema` | `RunScript(service.webostv,picture_preset,cinema)` |
+| `picture_setting` | key and value: `backlight` 0–100, `hdrDynamicToneMapping` on/off/HGIG, `noiseReduction` / `mpegNoiseReduction` off/low/medium/high/auto, `smoothGradation` / `superResolution` off/low/medium/high, `eyeComfortMode` on/off | `RunScript(service.webostv,picture_setting,noiseReduction,medium)` |
+| `picture_settings` | none | Current values of those settings (last sent, on TVs that won't report them) |
+| `motion` | `off`, `cinemaClear`, `natural`, `smooth` (TruMotion) | `RunScript(service.webostv,motion,off)` |
 | `next_playback` | `picture=<filmmaker\|bright\|preset>`, `screen_off`, `power_off_at_end` | `RunScript(service.webostv,next_playback,picture=filmmaker)` |
 | `command` | SSAP uri, optional JSON payload | `RunScript(service.webostv,command,ssap://system/getSystemInfo)` |
 | `status` | none | Shows connection, model, firmware |
 | `repair` | none | Forgets the key and re-prompts on the TV |
-| `setting` | setting id | Toggles an on/off setting or picks an option (skins): `rules_enabled`, `restore_on_stop`, `resume_on_return`, `transparent_control`, `toast_on_connect`, `auto_discover`, `loopback_fallback`, `debug`, `on_tv_off`, `on_switch_away` |
-| `ui` | optional page: `picture_preset`, `input`, `app`, `sound_output`, `volume`, `remote`, `toast`, `status`, `find_tv`, `repair` | Opens the program UI, or one of its pickers directly (for skins) |
+| `setting` | setting id | Toggles an on/off setting or picks an option (skins): `rules_enabled`, `restore_on_stop`, `resume_on_return`, `transparent_control`, `toast_on_connect`, `auto_discover`, `loopback_fallback`, `debug`, `on_tv_off`, `on_switch_away`, `motion_film`, `motion_video`, `motion_restore`, `quality_livetv`, `quality_sd`, `quality_hd`, `sound_video`, `sound_livetv`, `sound_music` |
+| `ui` | optional page: `osd` (the OSD's LG TV menu), `picture_preset`, `motion`, `input`, `app`, `sound_output`, `volume`, `remote`, `toast`, `status`, `find_tv`, `repair` | Opens the program UI, or one of its pickers directly (for skins) |
 
 `RunScript` splits arguments on commas; the addon rejoins free text (toast messages, JSON
 payloads), so `RunScript(service.webostv,toast,Hello, world)` works.
@@ -138,6 +141,27 @@ and applies the matching preset after a short delay (default 1.5 s), so a quick 
 doesn't make the TV flip back and forth. When playback stops it restores the preset that was in use while
 Kodi was idle. The TV keeps separate picture memories for SDR and HDR signals, so the
 mode it reports at the instant playback starts isn't a safe restore target.
+
+## Motion, quality and sound
+
+*Settings → Motion, quality & sound* (all "Leave unchanged" by default):
+
+- **Motion smoothing (TruMotion)**: one value for film (up to 30 fps) and one for video (50/60 fps),
+  from Kodi's frame rate, plus one to set when playback stops. webOS keeps TruMotion per picture
+  mode, so it's sent once the picture mode for the signal is in place. No webOS version tested
+  reports TruMotion (webOS 5.5 refuses the key, webOS 10 has no value for it), so it's sent unconfirmed.
+- **Source quality**: a cleanup level (off/low/medium/high) for Live TV, SD video (below 720p) and
+  HD/4K video, applied to noise reduction, MPEG noise reduction, smooth gradation and super resolution.
+  On TVs that report these, the previous values come back on stop if the TV is still in the picture
+  mode they were changed in (SDR, typically); HDR playback changes the HDR memory, which Kodi's menus
+  never use. Set every source you use: a level stays until something changes it.
+- **Sound output**: an output for movies and TV shows, Live TV and music (radio counts as music). The
+  previous output comes back 3 s after playback stops, unless it was changed during playback.
+
+The OSD's **LG TV** menu (`ui,osd`, used by skin.estuary.lg) lists picture preset, motion smoothing,
+OLED pixel brightness, HDR dynamic tone mapping, noise reduction, MPEG noise reduction, smooth
+gradation, super resolution, eye comfort, sound output and screen off, with current values. webOS 5.5
+accepts all of these but reports none, so it shows the last value sent from Kodi.
 
 ## TV integration
 

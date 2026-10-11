@@ -10,6 +10,12 @@ ADDON_ID = "service.webostv"
 # Spinner settings store an index into these.
 TV_OFF_ACTIONS = ("none", "pause", "stop", "shutdown")
 SWITCH_AWAY_ACTIONS = ("none", "pause", "stop")
+# TruMotion values; "" = leave unchanged.
+MOTION_MODES = ("", "off", "cinemaClear", "natural", "smooth")
+# Sound outputs a rule can pick; "" = leave unchanged.
+# Source-quality cleanup level; "" = leave unchanged.
+QUALITY_LEVELS = ("", "off", "low", "medium", "high")
+SOUND_RULE_OUTPUTS = ("", "tv_speaker", "external_arc", "external_optical", "bt_soundbar", "headphone")
 
 
 def _option(addon: xbmcaddon.Addon, key: str, options: tuple[str, ...]) -> str:
@@ -44,6 +50,18 @@ class Settings:
     on_switch_away: str = "none"
     resume_on_return: bool = True
     transparent_control: bool = False
+    # Motion smoothing by frame rate (blind writes: TVs won't report it)
+    motion_film: str = ""
+    motion_video: str = ""
+    motion_restore: str = ""
+    # Source quality: noise reduction etc. by source
+    quality_livetv: str = ""
+    quality_sd: str = ""
+    quality_hd: str = ""
+    # Sound output by content
+    sound_video: str = ""
+    sound_livetv: str = ""
+    sound_music: str = ""
 
     @classmethod
     def load(cls, addon: xbmcaddon.Addon | None = None) -> Settings:
@@ -77,6 +95,15 @@ class Settings:
             on_switch_away=_option(addon, "on_switch_away", SWITCH_AWAY_ACTIONS),
             resume_on_return=addon.getSettingBool("resume_on_return"),
             transparent_control=addon.getSettingBool("transparent_control"),
+            motion_film=_option(addon, "motion_film", MOTION_MODES),
+            motion_video=_option(addon, "motion_video", MOTION_MODES),
+            motion_restore=_option(addon, "motion_restore", MOTION_MODES),
+            quality_livetv=_option(addon, "quality_livetv", QUALITY_LEVELS),
+            quality_sd=_option(addon, "quality_sd", QUALITY_LEVELS),
+            quality_hd=_option(addon, "quality_hd", QUALITY_LEVELS),
+            sound_video=_option(addon, "sound_video", SOUND_RULE_OUTPUTS),
+            sound_livetv=_option(addon, "sound_livetv", SOUND_RULE_OUTPUTS),
+            sound_music=_option(addon, "sound_music", SOUND_RULE_OUTPUTS),
         )
 
     @property

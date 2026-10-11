@@ -139,9 +139,16 @@ class PropertyPublisher:
     def __init__(self, window_id: int = HOME_WINDOW) -> None:
         self._window = xbmcgui.Window(window_id)
         self._last: dict[str, str] = {}
+        self.closed = False
+
+    def close(self) -> None:
+        """Stop writing. See WebOsService.shutdown: no GUI calls while stopping."""
+        self.closed = True
 
     def publish(self, state: TvState) -> list[str]:
         """Publish a snapshot; return the property names that changed."""
+        if self.closed:
+            return []
         changed = []
         for name, value in state.properties().items():
             if self._last.get(name) == value:

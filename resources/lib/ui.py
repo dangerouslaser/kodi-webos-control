@@ -56,6 +56,8 @@ def pages() -> dict[str, Any]:
         "app": choose_app,
         "sound_output": choose_sound_output,
         "picture_preset": choose_picture_preset,
+        "motion": choose_motion,
+        "osd": osd_menu,
         "volume": choose_volume,
         "remote": remote,
         "toast": send_toast,
@@ -163,6 +165,92 @@ def choose_picture_preset() -> None:
         _call("picture_preset", [values[index]])
 
 
+MOTION_VALUES = ("off", "cinemaClear", "natural", "smooth")
+
+
+def choose_motion() -> None:
+    """Set TruMotion now (for the picture mode in use)."""
+    reply = _call("status")
+    if not reply:
+        return
+    current = reply["result"].get("motion") or ""
+    labels = [_mark(lang.get(lang.MOTION_LABELS[v]), v == current) for v in MOTION_VALUES]
+    index = _dialog().select(lang.get(lang.MOTION), labels)
+    if index >= 0:
+        _call("motion", [MOTION_VALUES[index]])
+
+
+# Quick picks in the OSD menu, in this order after preset and motion.
+OSD_ADJUSTMENTS = (
+    "backlight", "hdrDynamicToneMapping", "noiseReduction", "mpegNoiseReduction",
+    "smoothGradation", "superResolution", "eyeComfortMode",
+)
+
+
+def _value_label(value: str) -> str:
+    from .adjustments import VALUE_LABELS  # noqa: PLC0415
+
+    return lang.get(VALUE_LABELS[value]) if value in VALUE_LABELS else value
+
+
+def choose_adjustment(key: str, current: str = "") -> None:
+    """Pick a value for one picture setting (OSD quick pick)."""
+    from .adjustments import ADJUSTMENTS  # noqa: PLC0415
+
+    adjustment = ADJUSTMENTS.get(key)
+    if adjustment is None:
+        return
+    values = list(adjustment.values)
+    if current and current not in values:
+        values.insert(0, current)
+    labels = [_mark(_value_label(v), v == current) for v in values]
+    preselect = values.index(current) if current in values else -1
+    index = _dialog().select(lang.get(adjustment.label), labels, preselect=preselect)
+    if index >= 0:
+        _call("picture_setting", [key, values[index]])
+
+
+def osd_menu() -> None:
+    """The OSD's LG TV button: picture settings, sound output and screen off."""
+    from . import presets  # noqa: PLC0415
+    from .adjustments import ADJUSTMENTS  # noqa: PLC0415
+    from .state import sound_output_label  # noqa: PLC0415
+
+    last = 0
+    while True:
+        reply = _call("status")
+        if not reply:
+            return
+        info = reply["result"]
+        values = (_call("picture_settings") or {"result": {"values": {}}})["result"]["values"]
+        motion = info.get("motion") or ""
+        menu = [
+            (lang.PICTURE_PRESET, presets.label(info["picture_preset"]) if info.get("picture_preset") else "",
+             choose_picture_preset),
+            (lang.MOTION, lang.get(lang.MOTION_LABELS[motion]) if motion in lang.MOTION_LABELS else "",
+             choose_motion),
+        ]
+        for key in OSD_ADJUSTMENTS:
+            current = values.get(key, "")
+            menu.append((ADJUSTMENTS[key].label, _value_label(current) if current else "",
+                         lambda key=key, current=current: choose_adjustment(key, current)))
+        menu += [
+            (lang.SOUND_OUTPUT, sound_output_label(info["sound_output"]) if info.get("sound_output") else "",
+             choose_sound_output),
+            (lang.SCREEN_OFF, "", None),
+        ]
+        labels = [f"{lang.get(label)}: {value}" if value else lang.get(label) for label, value, _ in menu]
+        index = _dialog().select(lang.get(lang.LG_TV), labels, preselect=last)
+        if index < 0:
+            return
+        last = index
+        action = menu[index][2]
+        if action is None:  # screen off: nothing left to look at
+            _call("screen", ["off"])
+            return
+        action()
+
+
 def _back_to_settings(stay: bool) -> None:
     # Settings dialog buttons close the dialog; reopen it unless called
     # from a skin page ("stay").
@@ -230,8 +318,16 @@ EDITABLE_BOOLS = {
 EDITABLE_OPTIONS = {
     "on_tv_off": (32210, 32211, 32212, 32213),
     "on_switch_away": (32210, 32211, 32212),
+    **{key: (32410, 32411, 32412, 32413, 32414) for key in ("motion_film", "motion_video", "motion_restore")},
+    **{key: (32420, 32421, 32422, 32423, 32424, 32425) for key in ("sound_video", "sound_livetv", "sound_music")},
+    **{key: (32530, 32531, 32532, 32533, 32534) for key in ("quality_livetv", "quality_sd", "quality_hd")},
 }
-OPTION_HEADINGS = {"on_tv_off": 32203, "on_switch_away": 32204}
+OPTION_HEADINGS = {
+    "on_tv_off": 32203, "on_switch_away": 32204,
+    "motion_film": 32401, "motion_video": 32402, "motion_restore": 32403,
+    "sound_video": 32404, "sound_livetv": 32405, "sound_music": 32406,
+    "quality_livetv": 32521, "quality_sd": 32522, "quality_hd": 32523,
+}
 
 
 def change_setting(key: str) -> None:
@@ -297,6 +393,7 @@ def show_status(info: dict[str, Any]) -> None:
         f"Input: {info.get('input') or '-'}",
         f"Sound output: {info.get('sound_output') or '-'}",
         f"Picture preset: {info.get('picture_preset') or '-'}",
+        f"Motion smoothing (last set): {info.get('motion') or '-'}",
         f"Kodi's TV input: {info.get('kodi_input') or 'not set'}"
         + {True: " (on screen)", False: " (not on screen)"}.get(info.get("kodi_on_screen"), ""),
         "Transparent control: "

@@ -310,3 +310,176 @@ def test_only_one_service_instance(tmp_path, monkeypatch):
     s1._release_instance_lock()
     assert s2._acquire_instance_lock()
     s2._release_instance_lock()
+
+
+# motion smoothing ---------------------------------------------------------
+
+
+@pytest.mark.parametrize(("fps", "cls"), [(23.976, "film"), (25, "film"), (30, "film"),
+                                          (50, "video"), (59.94, "video"), (0, None)])
+def test_motion_class(fps, cls):
+    from resources.lib.automations import motion_class
+
+    assert motion_class(fps) == cls
+
+
+async def test_motion_follows_frame_rate_after_the_preset(tv, controller):
+    settings = rules_settings(motion_film="off", motion_video="smooth", motion_restore="natural")
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("hdr10", 23.976)
+    # Sent after the preset, so it lands in that preset's memory.
+    await wait_for(lambda: tv.model.motion.get("cinema") == "off")
+    assert controller.status()["motion"] == "off"
+    rules.stopped()
+    await wait_for(lambda: tv.model.picture_mode == "filmMaker")
+    await wait_for(lambda: tv.model.motion.get("filmMaker") == "natural")
+    await rules.close()
+
+
+async def test_motion_without_picture_rules(tv, controller):
+    settings = dataclasses.replace(BASE, motion_video="smooth", rules_debounce=0.1)
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("sdr", 59.94)
+    await wait_for(lambda: tv.model.motion.get("filmMaker") == "smooth")
+    calls = len(tv.luna_calls)
+    rules.stopped()  # no "after playback" value: nothing sent
+    await asyncio.sleep(0.3)
+    assert len(tv.luna_calls) == calls
+    await rules.close()
+
+
+async def test_motion_unknown_frame_rate_sends_nothing(tv, controller):
+    settings = dataclasses.replace(BASE, motion_film="off", motion_video="smooth",
+                                   motion_restore="natural", rules_debounce=0.1)
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("sdr", 0)
+    rules.stopped()
+    await asyncio.sleep(0.4)
+    assert tv.luna_calls == []
+    await rules.close()
+
+
+# sound output -------------------------------------------------------------
+
+
+def sound_settings(**kw):
+    return dataclasses.replace(BASE, rules_debounce=0.1, **kw)
+
+
+async def test_sound_output_by_content_and_restore(tv, controller):
+    from resources.lib.soundrules import SoundRules
+
+    sound = SoundRules(controller, sound_settings(sound_music="external_arc", sound_livetv="tv_speaker"))
+    sound.started("music")
+    await wait_for(lambda: tv.model.sound_output == "external_arc")
+    sound.started("video")  # no rule for video: back to the user's output
+    await wait_for(lambda: tv.model.sound_output == "tv_speaker")
+    sound.started("music")
+    await wait_for(lambda: tv.model.sound_output == "external_arc")
+    sound.stopped()
+    await wait_for(lambda: tv.model.sound_output == "tv_speaker")
+    await sound.close()
+
+
+async def test_sound_output_quick_restart_does_not_switch_back(tv, controller):
+    from resources.lib.soundrules import SoundRules
+
+    sound = SoundRules(controller, sound_settings(sound_music="external_arc"))
+    sound.started("music")
+    await wait_for(lambda: controller.state.sound_output == "external_arc")
+    sound.stopped()
+    sound.started("music")  # next playlist item
+    await asyncio.sleep(0.3)
+    assert tv.model.sound_output == "external_arc"
+    await sound.close()
+
+
+async def test_sound_output_changed_by_user_is_kept(tv, controller):
+    from resources.lib.soundrules import SoundRules
+
+    sound = SoundRules(controller, sound_settings(sound_video="external_arc"))
+    sound.started("video")
+    await wait_for(lambda: controller.state.sound_output == "external_arc")
+    await controller.sound_output("bt_soundbar")  # picked during playback
+    await wait_for(lambda: controller.state.sound_output == "bt_soundbar")
+    sound.stopped()
+    await asyncio.sleep(0.3)
+    assert tv.model.sound_output == "bt_soundbar"
+    await sound.close()
+
+
+# picture settings and source quality -------------------------------------
+
+
+@pytest.mark.parametrize(("content", "height", "cls"), [
+    ("livetv", 0, "livetv"), ("livetv", 2160, "livetv"), ("video", 576, "sd"),
+    ("video", 720, "hd"), ("video", 2160, "hd"), ("video", 0, None),
+])
+def test_source_class(content, height, cls):
+    from resources.lib.adjustments import source_class
+
+    assert source_class(content, height) == cls
+
+
+async def test_picture_setting_read_and_write(tv, controller):
+    values = await controller.picture_settings(["backlight", "noiseReduction", "bogus"])
+    assert values == {"backlight": "80", "noiseReduction": "off"}
+    assert await controller.set_picture_setting("noiseReduction", "MEDIUM") == "medium"
+    assert tv.model.picture["filmMaker"] == {"noiseReduction": "medium"}
+    assert await controller.set_picture_setting("backlight", "60") == "60"
+    assert tv.model.picture["filmMaker"]["backlight"] == 60  # sent as a number
+    assert (await controller.picture_settings(["backlight"]))["backlight"] == "60"
+    with pytest.raises(BadRequest):
+        await controller.set_picture_setting("noiseReduction", "extreme")
+    with pytest.raises(BadRequest):
+        await controller.set_picture_setting("backlight", "101")
+    with pytest.raises(BadRequest):
+        await controller.set_picture_setting("sharpness", "10")
+
+
+async def test_old_webos_picture_settings_are_remembered(old_webos_controller):
+    tv, controller = old_webos_controller
+    assert await controller.picture_settings(["eyeComfortMode"]) == {"eyeComfortMode": ""}
+    await controller.set_picture_setting("eyeComfortMode", "on")
+    assert tv.model.picture["filmMaker"]["eyeComfortMode"] == "on"
+    assert await controller.picture_settings(["eyeComfortMode"]) == {"eyeComfortMode": "on"}
+
+
+QUALITY = ("noiseReduction", "mpegNoiseReduction", "smoothGradation", "superResolution")
+
+
+async def test_source_quality_applies_and_restores(tv, controller):
+    tv.model.picture["filmMaker"] = {"noiseReduction": "low"}
+    settings = dataclasses.replace(BASE, quality_livetv="high", quality_hd="off", rules_debounce=0.1)
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("sdr", 50, "livetv", 1080)
+    await wait_for(lambda: tv.model.picture["filmMaker"].get("superResolution") == "high")
+    assert {k: tv.model.picture["filmMaker"][k] for k in QUALITY} == dict.fromkeys(QUALITY, "high")
+    rules.stopped()
+    # Same picture mode as before: the previous values come back.
+    await wait_for(lambda: tv.model.picture["filmMaker"]["noiseReduction"] == "low")
+    assert tv.model.picture["filmMaker"]["superResolution"] == "off"
+    await rules.close()
+
+
+async def test_source_quality_in_another_mode_is_not_restored(tv, controller):
+    settings = rules_settings(quality_hd="medium")
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("hdr10", 23.976, "video", 2160)
+    await wait_for(lambda: tv.model.picture.get("cinema", {}).get("noiseReduction") == "medium")
+    rules.stopped()
+    await wait_for(lambda: tv.model.picture_mode == "filmMaker")
+    await asyncio.sleep(0.2)
+    assert "filmMaker" not in tv.model.picture  # the menus' mode was never touched
+    assert tv.model.picture["cinema"]["noiseReduction"] == "medium"
+    await rules.close()
+
+
+async def test_source_quality_unknown_source_does_nothing(tv, controller):
+    settings = dataclasses.replace(BASE, quality_sd="high", quality_hd="high", rules_debounce=0.1)
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("sdr", 24, "video", 0)
+    rules.stopped()
+    await asyncio.sleep(0.4)
+    assert tv.luna_calls == []
+    await rules.close()

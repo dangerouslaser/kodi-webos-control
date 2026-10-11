@@ -358,3 +358,227 @@ msgstr ""
 msgctxt "#32310"
 msgid "Volume"
 msgstr ""
+
+msgctxt "#32400"
+msgid "Motion, quality & sound"
+msgstr ""
+
+msgctxt "#32401"
+msgid "Motion smoothing: film (up to 30 fps)"
+msgstr ""
+
+msgctxt "#32402"
+msgid "Motion smoothing: video (50/60 fps)"
+msgstr ""
+
+msgctxt "#32403"
+msgid "Motion smoothing after playback"
+msgstr ""
+
+msgctxt "#32404"
+msgid "Sound output: movies & TV shows"
+msgstr ""
+
+msgctxt "#32405"
+msgid "Sound output: Live TV"
+msgstr ""
+
+msgctxt "#32406"
+msgid "Sound output: music"
+msgstr ""
+
+msgctxt "#32407"
+msgid "Motion smoothing (TruMotion)"
+msgstr ""
+
+msgctxt "#32408"
+msgid "Sound output"
+msgstr ""
+
+msgctxt "#32410"
+msgid "Leave unchanged"
+msgstr ""
+
+msgctxt "#32411"
+msgid "Off"
+msgstr ""
+
+msgctxt "#32412"
+msgid "Cinematic Movement"
+msgstr ""
+
+msgctxt "#32413"
+msgid "Natural"
+msgstr ""
+
+msgctxt "#32414"
+msgid "Smooth"
+msgstr ""
+
+msgctxt "#32420"
+msgid "Leave unchanged"
+msgstr ""
+
+msgctxt "#32421"
+msgid "TV speaker"
+msgstr ""
+
+msgctxt "#32422"
+msgid "HDMI ARC"
+msgstr ""
+
+msgctxt "#32423"
+msgid "Optical"
+msgstr ""
+
+msgctxt "#32424"
+msgid "Bluetooth"
+msgstr ""
+
+msgctxt "#32425"
+msgid "Headphones"
+msgstr ""
+
+msgctxt "#32430"
+msgid "Motion smoothing"
+msgstr ""
+
+msgctxt "#32431"
+msgid "LG TV"
+msgstr ""
+
+msgctxt "#32432"
+msgid "Screen off"
+msgstr ""
+
+msgctxt "#32433"
+msgid "Set while playing; applies to the picture mode in use."
+msgstr ""
+
+msgctxt "#32451"
+msgid "TruMotion for 24, 25 and 30 fps video (films, most TV dramas). The TV can't report this setting, so it is sent without confirmation and lands in the picture mode in use."
+msgstr ""
+
+msgctxt "#32452"
+msgid "TruMotion for 50 and 60 fps video (sports, live TV, home video)."
+msgstr ""
+
+msgctxt "#32453"
+msgid "TruMotion to set when playback stops, so Kodi's menus go back to your usual setting. Leave unchanged keeps whatever playback set."
+msgstr ""
+
+msgctxt "#32454"
+msgid "Sound output while a movie, episode or other video plays. The previous output comes back when playback stops."
+msgstr ""
+
+msgctxt "#32455"
+msgid "Sound output while Live TV plays."
+msgstr ""
+
+msgctxt "#32456"
+msgid "Sound output while music or radio plays."
+msgstr ""
+
+msgctxt "#32500"
+msgid "OLED pixel brightness"
+msgstr ""
+
+msgctxt "#32501"
+msgid "HDR dynamic tone mapping"
+msgstr ""
+
+msgctxt "#32502"
+msgid "Noise reduction"
+msgstr ""
+
+msgctxt "#32503"
+msgid "MPEG noise reduction"
+msgstr ""
+
+msgctxt "#32504"
+msgid "Smooth gradation"
+msgstr ""
+
+msgctxt "#32505"
+msgid "Super resolution"
+msgstr ""
+
+msgctxt "#32506"
+msgid "Eye comfort mode"
+msgstr ""
+
+msgctxt "#32510"
+msgid "Off"
+msgstr ""
+
+msgctxt "#32511"
+msgid "On"
+msgstr ""
+
+msgctxt "#32512"
+msgid "Low"
+msgstr ""
+
+msgctxt "#32513"
+msgid "Medium"
+msgstr ""
+
+msgctxt "#32514"
+msgid "High"
+msgstr ""
+
+msgctxt "#32515"
+msgid "Auto"
+msgstr ""
+
+msgctxt "#32516"
+msgid "HGIG"
+msgstr ""
+
+msgctxt "#32520"
+msgid "Source quality"
+msgstr ""
+
+msgctxt "#32521"
+msgid "Cleanup: Live TV"
+msgstr ""
+
+msgctxt "#32522"
+msgid "Cleanup: SD video (below 720p)"
+msgstr ""
+
+msgctxt "#32523"
+msgid "Cleanup: HD and 4K video"
+msgstr ""
+
+msgctxt "#32530"
+msgid "Leave unchanged"
+msgstr ""
+
+msgctxt "#32531"
+msgid "Off"
+msgstr ""
+
+msgctxt "#32532"
+msgid "Low"
+msgstr ""
+
+msgctxt "#32533"
+msgid "Medium"
+msgstr ""
+
+msgctxt "#32534"
+msgid "High"
+msgstr ""
+
+msgctxt "#32571"
+msgid "Noise reduction, MPEG noise reduction, smooth gradation and super resolution while Live TV plays. Set every source you use: a level stays on the TV until something changes it."
+msgstr ""
+
+msgctxt "#32572"
+msgid "The same cleanup for video below 720p (DVDs, old TV recordings)."
+msgstr ""
+
+msgctxt "#32573"
+msgid "The same cleanup for 720p, 1080p and 4K video. Off suits good sources such as Blu-ray rips."
+msgstr ""

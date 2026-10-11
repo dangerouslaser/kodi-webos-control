@@ -18,7 +18,7 @@ from aiowebostv import WebOsClient, WebOsTvCommandError, WebOsTvPairError
 from aiowebostv.buttons import BUTTONS
 
 from . import kodilog as log
-from . import discovery, luna, presets, storage, wol
+from . import adjustments, discovery, luna, presets, storage, wol
 from .errors import BadRequest, CommandFailed, Disconnected
 from .net import Backoff, discover_lan_ip
 from .pairing import KeyStore
@@ -96,6 +96,10 @@ class TvController:
         # settings (webOS 5.x): presets are then set "blind" from a built-in
         # list, and picture_preset is the last one set from Kodi.
         self.picture_readable: bool | None = None
+        # Last TruMotion value sent from Kodi ("" = none); the TV won't say.
+        self.motion = ""
+        # Other picture settings: last read from the TV or sent from Kodi.
+        self.picture_values: dict[str, str] = {}
         # Callbacks run with the new preset name (automations track it).
         self.picture_listeners: list[Callable[[str], None]] = []
         # Callbacks run with every new TvState (the TV watcher uses them).
@@ -650,21 +654,7 @@ class TvController:
             raise BadRequest("missing picture preset")
         if self.picture_preset == mode:
             return mode
-
-        async def request(uri: str, payload: dict[str, Any] | None) -> dict[str, Any]:
-            try:
-                return await client.request(uri, payload)
-            except WebOsTvCommandError as err:
-                raise CommandFailed(str(err)) from err
-
-        try:
-            await luna.set_picture_settings(request, {"pictureMode": mode})
-        except CommandFailed:
-            raise
-        except RuntimeError as err:
-            raise CommandFailed(str(err)) from err
-        except (OSError, aiohttp.ClientError) as err:
-            raise Disconnected(str(err)) from err
+        await self._set_picture_settings(client, {"pictureMode": mode})
 
         if self.picture_readable is False:
             log.info(f"picture mode sent: {mode} (this TV can't confirm it)")
@@ -685,6 +675,76 @@ class TvController:
         error = f"TV did not apply picture preset {mode!r} (still {current!r})"
         log.warning(error)
         raise CommandFailed(error)
+
+    async def set_motion(self, mode: str) -> None:
+        """Set TruMotion for the picture mode in use.
+
+        No webOS version tested reports this setting back (webOS 5.5 refuses
+        the key, webOS 10 has no value for it), so it is sent unconfirmed.
+        """
+        client = self._require()
+        mode = mode.strip()
+        if not mode:
+            raise BadRequest("missing motion setting")
+        await self._set_picture_settings(client, {"truMotionMode": mode})
+        self.motion = mode
+        log.info(f"motion smoothing sent: {mode}")
+
+    async def picture_settings(self, keys: list[str] | tuple[str, ...]) -> dict[str, str]:
+        """Current values of these picture settings ("" when unknown).
+
+        TVs that won't report picture settings get the last values sent
+        from Kodi.
+        """
+        self._require()
+        keys = [k for k in keys if k in adjustments.ADJUSTMENTS]
+        if keys and self.picture_readable is not False:
+            try:
+                res = await self._call("request", PICTURE_SETTINGS, {"category": "picture", "keys": keys})
+            except CommandFailed as err:
+                log.debug(f"cannot read picture settings {keys}: {err.message}")
+            else:
+                for key, value in (res.get("settings") or {}).items():
+                    if key in keys and isinstance(value, (str, int)):
+                        self.picture_values[key] = str(value)
+        return {k: self.picture_values.get(k, "") for k in keys}
+
+    async def set_picture_setting(self, key: str, value: str) -> str:
+        """Set one picture setting (for the input and picture mode in use)."""
+        client = self._require()
+        adjustment = adjustments.ADJUSTMENTS.get(key)
+        if adjustment is None:
+            raise BadRequest(f"unknown picture setting {key!r}")
+        parsed = adjustment.parse(value)
+        if parsed is None:
+            raise BadRequest(f"{key} can't be {value!r}")
+        await self._set_picture_settings(client, {key: adjustment.wire(parsed)})
+        self.picture_values[key] = parsed
+        log.info(f"picture setting {key} sent: {parsed}")
+        return parsed
+
+    async def set_picture_values(self, values: dict[str, str]) -> None:
+        """Set several picture settings in one call (values already valid)."""
+        client = self._require()
+        wire = {k: adjustments.ADJUSTMENTS[k].wire(v) for k, v in values.items()}
+        await self._set_picture_settings(client, wire)
+        self.picture_values.update(values)
+
+    async def _set_picture_settings(self, client: WebOsClient, settings: dict[str, Any]) -> None:
+        async def request(uri: str, payload: dict[str, Any] | None) -> dict[str, Any]:
+            try:
+                return await client.request(uri, payload)
+            except WebOsTvCommandError as err:
+                raise CommandFailed(str(err)) from err
+
+        try:
+            await luna.set_picture_settings(request, settings)
+        except CommandFailed:
+            raise
+        except RuntimeError as err:
+            raise CommandFailed(str(err)) from err
+        except (OSError, aiohttp.ClientError) as err:
+            raise Disconnected(str(err)) from err
 
     async def firmware(self) -> str:
         """Firmware version string, cached per connection.
@@ -739,6 +799,7 @@ class TvController:
             "input": self.state.input_id,
             "sound_output": self.state.sound_output,
             "picture_preset": self.state.picture_preset,
+            "motion": self.motion,
         }
 
     def launch_points(self) -> dict[str, Any]:
