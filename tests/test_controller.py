@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import xbmc
 import xbmcgui
 from fake_tv import FakeTv
 
@@ -377,3 +378,31 @@ def test_reported_mac_picks_valid_wired_then_wifi():
                          "wifiInfo": {"macAddress": "e0:85:4d:0f:fe:d6"}}) == "E0:85:4D:0F:FE:D6"
     assert reported_mac({}) == ""
     assert reported_mac(None) == ""
+
+
+async def test_stalled_connect_is_abandoned_and_retried(tv, monkeypatch):
+    # Seen once on a real TV turning on: a connect attempt that never
+    # finished left the service disconnected for good.
+    from aiowebostv import webos_client
+
+    from resources.lib import tv as tv_module
+
+    monkeypatch.setattr(tv_module, "CYCLE_TIMEOUT", 0.5)
+    real_hello = webos_client.WebOsClient._get_hello_info
+    calls = []
+
+    async def hello(self, ws):
+        calls.append(1)
+        if len(calls) == 1:
+            await asyncio.Event().wait()  # the TV never answers
+        return await real_hello(self, ws)
+
+    monkeypatch.setattr(webos_client.WebOsClient, "_get_hello_info", hello)
+    controller, _ = make_controller(Settings(host="127.0.0.1", loopback_fallback=False), backoff_base=0.05)
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected, timeout=5)
+        assert len(calls) >= 2
+        assert any("stalled" in m and "connect_handler" in m for _, m in xbmc.logs)
+    finally:
+        await controller.stop()

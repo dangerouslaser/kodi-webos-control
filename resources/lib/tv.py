@@ -29,6 +29,15 @@ RUNTIME_FILE = "runtime.json"
 IDENTITY_FILE = "tv.json"
 # Re-discovery runs at most this often while the TV is unreachable.
 DISCOVERY_INTERVAL = 120.0
+# Watchdog. Every step of a connect has its own timeout, yet the service was
+# once seen waiting forever after the TV went off and on again. A connect
+# cycle longer than this, or a dropped connection that doesn't finish closing
+# within STALL_TIMEOUT, is abandoned (with the stuck tasks logged) and a fresh
+# client tried.
+CYCLE_TIMEOUT = 240.0
+STALL_TIMEOUT = 30.0
+DISCONNECT_TIMEOUT = 5.0
+WATCH_INTERVAL = 5.0
 PICTURE_SETTINGS = "settings/getSystemSettings"
 PICTURE_QUERY = {"category": "picture", "keys": ["pictureMode"]}
 PRESET_VERIFY_TIMEOUT = 3.0
@@ -156,7 +165,13 @@ class TvController:
             if self.pairing_blocked:
                 await self._wait_wake(None)
                 continue
-            if await self._connect_cycle():
+            try:
+                async with asyncio.timeout(CYCLE_TIMEOUT):
+                    connected = await self._connect_cycle()
+            except TimeoutError:
+                self._abandon_client("connecting to the TV stalled")
+                connected = False
+            if connected:
                 self._backoff.reset()
                 await self._wait_disconnected()
                 if self._stopping:
@@ -405,8 +420,21 @@ class TvController:
         task = client.connect_task if client else None
         if task is None:
             return
-        await asyncio.wait({task})
-        if not task.cancelled() and task.exception() is not None:
+        loop = asyncio.get_running_loop()
+        dropped_at: float | None = None
+        while True:
+            done, _ = await asyncio.wait({task}, timeout=WATCH_INTERVAL)
+            if done or self._stopping or self.client is not client:
+                break
+            if client.connection is not None:
+                dropped_at = None
+                continue
+            # The connection is gone but the client hasn't finished closing.
+            dropped_at = dropped_at or loop.time()
+            if loop.time() - dropped_at > STALL_TIMEOUT:
+                self._abandon_client("the dropped TV connection didn't close")
+                return
+        if task.done() and not task.cancelled() and task.exception() is not None:
             log.debug(f"connection ended: {task.exception()!r}")
 
     async def _disconnect_client(self) -> None:
@@ -414,8 +442,28 @@ class TvController:
         if client is None:
             return
         self._connected = False
-        with contextlib.suppress(Exception):
-            await client.disconnect()
+        try:
+            async with asyncio.timeout(DISCONNECT_TIMEOUT):
+                await client.disconnect()
+        except TimeoutError:
+            self._abandon_client("disconnecting from the TV stalled")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _abandon_client(self, reason: str) -> None:
+        """Drop a stuck client without waiting for it; log what it waits on."""
+        stuck = []
+        for task in asyncio.all_tasks():
+            if task is asyncio.current_task() or task.done():
+                continue
+            frames = task.get_stack(limit=1)
+            where = f"{frames[-1].f_code.co_filename.rsplit('/', 1)[-1]}:{frames[-1].f_lineno}" if frames else "?"
+            stuck.append(f"{getattr(task.get_coro(), '__qualname__', task.get_name())} @ {where}")
+        log.warning(f"{reason}; starting over (waiting tasks: {'; '.join(stuck) or 'none'})")
+        client, self.client = self.client, None
+        self._connected = False
+        if client is not None and client.connect_task is not None:
+            client.connect_task.cancel()
 
     # state ---------------------------------------------------------------
 
