@@ -246,7 +246,7 @@ async def test_stop_while_waiting_for_signal_gives_up_quickly(tv, controller, mo
 
 @pytest.fixture
 async def old_webos_controller(patch_ports):
-    """A TV like webOS 5.5: picture settings readable only for a few keys."""
+    """A TV like webOS 5.5: picture mode can be set, but not read or listed."""
     tv = FakeTv()
     tv.fail_uris["settings/getSystemSettings"] = "Some keys are not allowed for the request. ( pictureMode )"
     tv.fail_uris["settings/getSystemSettingDesc"] = "category, picture doesn't support the key(s): pictureMode"
@@ -255,35 +255,50 @@ async def old_webos_controller(patch_ports):
     publisher = PropertyPublisher()
     c = TvController(BASE, on_state=publisher.publish, backoff_base=0.05)
     await c.start()
-    await wait_for(lambda: c.connected and c.picture_supported is False)
+    await wait_for(lambda: c.connected and c.picture_readable is False)
     yield tv, c
     await c.stop()
     await tv.stop()
 
 
-async def test_old_webos_turns_picture_presets_off_cleanly(old_webos_controller):
+async def test_old_webos_sets_presets_blind(old_webos_controller):
     tv, controller = old_webos_controller
     home = xbmcgui.Window(10000)
-    await wait_for(lambda: home.getProperty("WebOS.PictureSupported") == "false")
-    for call in (controller.picture_modes(), controller.set_picture_mode("cinema"), controller.get_picture_mode()):
-        with pytest.raises(BadRequest, match="aren't available"):
-            await call
-    rules = PlaybackRules(controller, rules_settings())
-    rules.av_started("hdr10")
-    await asyncio.sleep(0.3)
-    rules.stopped()
-    await asyncio.sleep(0.3)
-    assert tv.luna_calls == []
-    await rules.close()
+    await wait_for(lambda: home.getProperty("WebOS.PictureReadable") == "false")
+    assert home.getProperty("WebOS.PictureSupported") == "true"
+    modes = [m["value"] for m in await controller.picture_modes()]
+    assert "filmMaker" in modes and "hdrCinema" in modes and "dolbyHdrCinema" in modes
+    # Sent once, no read-back, and remembered as the current preset.
+    assert await controller.set_picture_mode("vivid") == "vivid"
+    assert tv.model.picture_mode == "vivid" and len(tv.luna_calls) == 1
+    await wait_for(lambda: home.getProperty("WebOS.PicturePresetLabel") == "Vivid")
+    assert await controller.get_picture_mode() == "vivid"
     import xbmc
 
     warnings = [m for level, m in xbmc.logs if level >= xbmc.LOGWARNING and "picture" in m.lower()]
     assert warnings == []
 
 
-async def test_picture_supported_flag_on_new_webos(tv, controller):
-    assert controller.picture_supported is True
-    await wait_for(lambda: xbmcgui.Window(10000).getProperty("WebOS.PictureSupported") == "true")
+async def test_old_webos_rules_apply_after_a_fixed_wait(old_webos_controller, monkeypatch):
+    import resources.lib.automations as automations
+
+    monkeypatch.setattr(automations, "BLIND_SIGNAL_DELAY", 0.2)
+    tv, controller = old_webos_controller
+    rules = PlaybackRules(controller, dataclasses.replace(rules_settings(), preset_hdr10="hdrCinema"))
+    assert rules.idle_mode is None  # unknown: the TV won't say
+    rules.av_started("hdr10")
+    await wait_for(lambda: tv.model.picture_mode == "hdrCinema")
+    calls = len(tv.luna_calls)
+    rules.stopped()
+    await asyncio.sleep(0.3)
+    # Nothing to restore: the TV keeps HDR and SDR presets apart, and the SDR one is unknown.
+    assert len(tv.luna_calls) == calls
+    await rules.close()
+
+
+async def test_picture_readable_flag_on_new_webos(tv, controller):
+    assert controller.picture_readable is True
+    await wait_for(lambda: xbmcgui.Window(10000).getProperty("WebOS.PictureReadable") == "true")
 
 
 def test_only_one_service_instance(tmp_path, monkeypatch):
