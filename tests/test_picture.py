@@ -242,3 +242,56 @@ async def test_stop_while_waiting_for_signal_gives_up_quickly(tv, controller, mo
     assert tv.luna_calls == []
     assert not rules._session
     await rules.close()
+
+
+@pytest.fixture
+async def old_webos_controller(patch_ports):
+    """A TV like webOS 5.5: picture settings readable only for a few keys."""
+    tv = FakeTv()
+    tv.fail_uris["settings/getSystemSettings"] = "Some keys are not allowed for the request. ( pictureMode )"
+    tv.fail_uris["settings/getSystemSettingDesc"] = "category, picture doesn't support the key(s): pictureMode"
+    await tv.start()
+    patch_ports(tv)
+    publisher = PropertyPublisher()
+    c = TvController(BASE, on_state=publisher.publish, backoff_base=0.05)
+    await c.start()
+    await wait_for(lambda: c.connected and c.picture_supported is False)
+    yield tv, c
+    await c.stop()
+    await tv.stop()
+
+
+async def test_old_webos_turns_picture_presets_off_cleanly(old_webos_controller):
+    tv, controller = old_webos_controller
+    home = xbmcgui.Window(10000)
+    await wait_for(lambda: home.getProperty("WebOS.PictureSupported") == "false")
+    for call in (controller.picture_modes(), controller.set_picture_mode("cinema"), controller.get_picture_mode()):
+        with pytest.raises(BadRequest, match="aren't available"):
+            await call
+    rules = PlaybackRules(controller, rules_settings())
+    rules.av_started("hdr10")
+    await asyncio.sleep(0.3)
+    rules.stopped()
+    await asyncio.sleep(0.3)
+    assert tv.luna_calls == []
+    await rules.close()
+    import xbmc
+
+    warnings = [m for level, m in xbmc.logs if level >= xbmc.LOGWARNING and "picture" in m.lower()]
+    assert warnings == []
+
+
+async def test_picture_supported_flag_on_new_webos(tv, controller):
+    assert controller.picture_supported is True
+    await wait_for(lambda: xbmcgui.Window(10000).getProperty("WebOS.PictureSupported") == "true")
+
+
+def test_only_one_service_instance(tmp_path, monkeypatch):
+    from resources.lib import service as service_mod
+
+    s1, s2 = service_mod.WebOsService(), service_mod.WebOsService()
+    assert s1._acquire_instance_lock()
+    assert not s2._acquire_instance_lock()
+    s1._release_instance_lock()
+    assert s2._acquire_instance_lock()
+    s2._release_instance_lock()
