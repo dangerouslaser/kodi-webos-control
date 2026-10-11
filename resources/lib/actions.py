@@ -167,6 +167,10 @@ async def _catalog(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any]:
     return tv.catalog()
 
 
+async def _launch_points(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any]:
+    return tv.launch_points()
+
+
 async def _picture_modes(tv: TvController, _kw: dict[str, Any]) -> dict[str, Any]:
     return {"modes": await tv.picture_modes(), "current": tv.state.picture_preset}
 
@@ -205,6 +209,7 @@ ACTIONS: dict[str, Action] = {
         Action("status", _no_args, _status, returns_data=True),
         Action("catalog", _no_args, _catalog, returns_data=True),
         Action("picture_modes", _no_args, _picture_modes, returns_data=True),
+        Action("launch_points", _no_args, _launch_points, returns_data=True),
         Action("next_playback", _parse_next_playback,
                lambda rules, kw: rules.arm(kw["override"]), on_rules=True,
                usage="picture=<filmmaker|bright|preset>[,screen_off][,power_off_at_end]"),

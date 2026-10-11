@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 ADDON_ID = "service.webostv"
-INCLUDE = ["addon.xml", "LICENSE.txt", "README.md", "service.py", "default.py", "context.py", "resources"]
+INCLUDE = ["addon.xml", "LICENSE.txt", "README.md", "service.py", "default.py", "context.py", "plugin.py", "resources"]
 EXCLUDE_DIRS = {"__pycache__"}
 EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".so", ".pyd", ".c"}
 

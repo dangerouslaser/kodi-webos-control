@@ -90,6 +90,15 @@ Every action works the same from `RunScript`, keymaps, skin buttons, and JSON-RP
 `RunScript` splits arguments on commas; the addon rejoins free text (toast messages, JSON
 payloads), so `RunScript(service.webostv,toast,Hello, world)` works.
 
+### Plugin: apps and inputs
+
+`plugin://service.webostv/?view=apps` lists the TV's apps in its launcher order, `?view=inputs` its
+inputs, with icons; picking an item launches it on the TV. Skins use these as widgets. The service
+keeps `addon_data/service.webostv/launcher.json` current whenever the TV's lists change and caches
+the icons in `addon_data/service.webostv/icons/` (downloaded from the TV's own address only; the TV
+serves them over HTTPS with a self-signed certificate), so listings load instantly and still show
+while the TV is off.
+
 ### JSON-RPC
 
 External clients (Home Assistant, scripts, a phone) can drive the addon through Kodi's

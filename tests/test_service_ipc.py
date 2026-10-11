@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 import time
 
@@ -396,3 +397,71 @@ def test_skin_setting_actions(running):
     service.reload_settings()
     assert xbmcgui.Window(10000).getProperty("WebOS.KodiInput") == "Apple TV (HDMI_2)"
     assert xbmcgui.Window(10000).getProperty("WebOS.ConfiguredHost") == "127.0.0.1"
+
+
+@pytest.fixture
+def icon_server():
+    """A local HTTP server standing in for the TV's icon resources."""
+    import http.server
+
+    png = b"\x89PNG\r\n\x1a\n" + b"0" * 64
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        hits: list[str] = []
+
+        def do_GET(self):  # noqa: N802
+            Handler.hits.append(self.path)
+            self.send_response(200)
+            self.send_header("Content-Type", "image/png")
+            self.end_headers()
+            self.wfile.write(png)
+
+        def log_message(self, *_a):
+            pass
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{server.server_address[1]}", Handler.hits
+    server.shutdown()
+
+
+def test_plugin_lists_apps_with_cached_icons_and_launches(running, icon_server):
+    import xbmcplugin
+
+    from resources.lib import plugin
+
+    _service, tv = running
+    base, hits = icon_server
+    tv.model.apps = [
+        {"id": "netflix", "title": "Netflix", "largeIcon": f"{base}/res/netflix.png", "bgColor": "#000000"},
+        {"id": "hidden.app", "title": "Hidden", "hidden": True},
+        {"id": "youtube.leanback.v4", "title": "YouTube", "icon": f"{base}/res/yt.png"},
+        {"id": "evil", "title": "Elsewhere", "icon": "http://192.0.2.9/x.png"},
+    ]
+    tv.runner.run(tv.push_apps())
+    from resources.lib import launcher
+
+    # The service refreshes launcher.json (icons cached) when the app list changes.
+    wait_until(lambda: any(a.get("icon") for a in launcher.read().get("apps", [])))
+
+    plugin.main(["plugin://service.webostv/", "7", "?view=apps"])
+    items = xbmcplugin.listings[7]
+    assert [li.label for _u, li, _f in items] == ["Netflix", "YouTube", "Elsewhere"]  # TV order, no hidden
+    netflix = items[0][1]
+    assert netflix.art["thumb"].endswith(".png") and os.path.exists(netflix.art["thumb"])
+    assert items[2][1].art == {}  # icons are only fetched from the TV's own address
+    assert sorted(hits) == ["/res/netflix.png", "/res/yt.png"]
+    assert items[0][0] == "plugin://service.webostv/?action=app&id=netflix"
+
+    # Listings read the file; nothing is fetched again.
+    plugin.main(["plugin://service.webostv/", "8", "?view=apps"])
+    assert len(hits) == 2
+
+    plugin.main(["plugin://service.webostv/", "9", "?view=inputs"])
+    assert [li.label for _u, li, _f in xbmcplugin.listings[9]][:2] == ["HDMI 1", "Apple TV"]
+
+    # Clicking an item launches it on the TV.
+    plugin.main(["plugin://service.webostv/", "-1", "?action=app&id=netflix"])
+    wait_until(lambda: tv.model.app_id == "netflix")
+    plugin.main(["plugin://service.webostv/", "-1", "?action=input&id=HDMI_2"])
+    wait_until(lambda: tv.model.app_id == "com.webos.app.hdmi2")

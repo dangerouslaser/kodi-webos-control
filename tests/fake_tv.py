@@ -155,6 +155,9 @@ class FakeTv:
         self.model.app_id = app_id
         await self._push("com.webos.applicationManager/getForegroundAppInfo")
 
+    async def push_apps(self) -> None:
+        await self._push("com.webos.applicationManager/listLaunchPoints")
+
     async def set_power(self, state: str) -> None:
         self.model.power = state
         await self._push("com.webos.service.tvpower/power/getPowerState")

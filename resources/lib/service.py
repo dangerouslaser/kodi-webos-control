@@ -62,6 +62,11 @@ class _Player(xbmc.Player):
         self._service.player_event("stopped")
 
 
+def _log_task_error(task: Any) -> None:
+    if not task.cancelled() and task.exception() is not None:
+        log.warning(f"background task failed: {task.exception()!r}")
+
+
 class _KodiSide:
     """What the TV watcher may do to Kodi (called from the loop thread)."""
 
@@ -115,6 +120,7 @@ class WebOsService:
         self.rules: Any = None
         self.watcher: Any = None
         self._inputs: tuple = ()
+        self._launcher_key: tuple = ()
         self.overlay: Any = None
 
     # entry ---------------------------------------------------------------
@@ -215,7 +221,20 @@ class WebOsService:
     # Kodi callbacks (Kodi thread) ---------------------------------------
 
     def _on_state(self, state: Any) -> None:
+        """Loop thread: every TvState the controller publishes."""
         self.publisher.publish(state)
+        # Refresh launcher.json (plugin listings) when apps or inputs change.
+        key = (tuple(a for a, _t in state.apps), tuple(i[0] for i in state.inputs))
+        if state.connected and state.apps and key != self._launcher_key:
+            self._launcher_key = key
+            from . import launcher  # noqa: PLC0415
+
+            try:
+                points = self.controller.launch_points()
+            except ActionError:
+                return
+            task = asyncio.ensure_future(launcher.refresh(points))
+            task.add_done_callback(_log_task_error)
         # Input names arrive after connecting; refresh WebOS.KodiInput.
         if state.inputs and state.inputs != self._inputs:
             self._inputs = state.inputs

@@ -702,6 +702,24 @@ class TvController:
             "picture_preset": self.state.picture_preset,
         }
 
+    def launch_points(self) -> dict[str, Any]:
+        """Apps in the TV's launcher order and inputs, with icon URLs."""
+        client = self._require()
+        apps = [
+            {"id": str(app_id), "title": str(app.get("title") or app_id), "icon": _icon(app),
+             "color": str(app.get("bgColor") or "")}
+            for app_id, app in (client.tv_state.apps or {}).items()
+            if isinstance(app, dict) and not app.get("hidden")
+        ]
+        inputs = [
+            {"id": str(i.get("id", "")), "title": str(i.get("label") or i.get("id", "")),
+             "icon": _icon(i), "connected": bool(i.get("connected", True))}
+            for i in (client.tv_state.inputs or {}).values()
+            if isinstance(i, dict)
+        ]
+        return {"host": self.active_host, "apps": apps, "inputs": inputs,
+                "current_app": self.state.app_id}
+
     def catalog(self) -> dict[str, Any]:
         self._require()
         return {
@@ -713,6 +731,14 @@ class TvController:
             "current_app": self.state.app_id,
             "sound_output": self.state.sound_output,
         }
+
+
+def _icon(item: dict[str, Any]) -> str:
+    for key in ("largeIcon", "mediumLargeIcon", "extraLargeIcon", "icon"):
+        value = item.get(key)
+        if isinstance(value, str) and value.startswith(("http://", "https://")):
+            return value
+    return ""
 
 
 def reported_mac(connection: dict[str, Any] | None) -> str:

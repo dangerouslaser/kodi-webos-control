@@ -16,8 +16,10 @@ rpc() {
 rpc false
 sleep 3
 COPYFILE_DISABLE=1 tar -C "$ROOT" -cf - --exclude __pycache__ --exclude .DS_Store \
-  addon.xml LICENSE.txt README.md service.py default.py context.py resources |
+  addon.xml LICENSE.txt README.md service.py default.py context.py plugin.py resources |
   ssh "root@$HOST" "set -e; rm -rf $DEST.new; mkdir -p $DEST.new; tar -xf - -C $DEST.new;
-    rm -rf $DEST.old; [ -d $DEST ] && mv $DEST $DEST.old; mv $DEST.new $DEST; rm -rf $DEST.old"
+    rm -rf $DEST.old; [ -d $DEST ] && mv $DEST $DEST.old; mv $DEST.new $DEST; rm -rf $DEST.old;
+    kodi-send -a 'UpdateLocalAddons' >/dev/null"
+sleep 2
 rpc true
 echo "deployed $ID to $HOST and restarted the service"

@@ -50,6 +50,22 @@ class Window:
         self._props.pop(key.lower(), None)
 
 
+class ListItem:
+    def __init__(self, label: str = "", *_a: Any, **_k: Any) -> None:
+        self.label = label
+        self.art: dict[str, str] = {}
+        self.properties: dict[str, str] = {}
+
+    def setArt(self, art: dict[str, str]) -> None:  # noqa: N802
+        self.art.update(art)
+
+    def setProperty(self, key: str, value: str) -> None:  # noqa: N802
+        self.properties[key] = value
+
+    def getLabel(self) -> str:  # noqa: N802
+        return self.label
+
+
 class Action:
     def __init__(self, action_id: int) -> None:
         self._id = action_id

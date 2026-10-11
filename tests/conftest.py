@@ -20,6 +20,7 @@ bootstrap.install()
 import xbmc  # noqa: E402
 import xbmcaddon  # noqa: E402
 import xbmcgui  # noqa: E402
+import xbmcplugin  # noqa: E402
 import xbmcvfs  # noqa: E402
 
 
@@ -28,6 +29,7 @@ def kodi(tmp_path, monkeypatch):
     """Reset the fake Kodi environment for each test."""
     xbmc._reset()
     xbmcgui._reset()
+    xbmcplugin._reset()
     xbmcaddon._reset()
     monkeypatch.setattr(xbmcvfs, "PROFILE_ROOT", tmp_path / "profile")
     return xbmc
