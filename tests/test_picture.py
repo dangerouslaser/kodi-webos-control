@@ -185,3 +185,60 @@ async def test_picture_modes_from_tv(tv, controller):
     values = {m["value"]: m["visible"] for m in modes}
     assert values["filmMaker"] is True
     assert values["hdrCinema"] is False
+
+
+async def test_idle_mode_ignores_hdr_and_dv_presets(tv, controller):
+    """After playback the TV can briefly report its DV memory; never restore to it."""
+    rules = PlaybackRules(controller, rules_settings())
+    assert rules.idle_mode == "filmMaker"
+    await tv.set_picture_mode("dolbyHdrCinemaBright")
+    await wait_for(lambda: controller.picture_preset == "dolbyHdrCinemaBright")
+    await asyncio.sleep(0.05)
+    assert rules.idle_mode == "filmMaker"
+    await tv.set_picture_mode("vivid")
+    await wait_for(lambda: rules.idle_mode == "vivid")
+    await rules.close()
+
+
+async def test_apply_waits_for_the_signal_to_switch(tv, controller, monkeypatch):
+    import resources.lib.automations as automations
+
+    monkeypatch.setattr(automations, "SIGNAL_SETTLE", 3.0)
+    rules = PlaybackRules(controller, dataclasses.replace(rules_settings(), preset_hdr10="hdrCinema"))
+    rules.av_started("hdr10")
+    await asyncio.sleep(0.5)
+    assert tv.luna_calls == []  # TV still on SDR: don't try an HDR preset yet
+    await tv.set_picture_mode("hdrStandard")  # the TV switched to its HDR memory
+    await wait_for(lambda: tv.model.picture_mode == "hdrCinema")
+    rules.stopped()
+    # Back on SDR: restore the SDR idle preset once the TV reports SDR again.
+    await tv.set_picture_mode("normal")
+    await wait_for(lambda: tv.model.picture_mode == "filmMaker")
+    await rules.close()
+
+
+async def test_apply_retries_when_the_tv_refuses(tv, controller, monkeypatch):
+    rules = PlaybackRules(controller, rules_settings())
+    tv.luna_blocked = True
+    rules.av_started("hdr10")  # preset "cinema"
+
+    async def unblock():
+        await asyncio.sleep(0.3)
+        tv.luna_blocked = False
+
+    await asyncio.gather(unblock(), wait_for(lambda: tv.model.picture_mode == "cinema", timeout=8))
+    await rules.close()
+
+
+async def test_stop_while_waiting_for_signal_gives_up_quickly(tv, controller, monkeypatch):
+    import resources.lib.automations as automations
+
+    monkeypatch.setattr(automations, "SIGNAL_SETTLE", 5.0)
+    rules = PlaybackRules(controller, dataclasses.replace(rules_settings(), preset_hdr10="hdrCinema"))
+    rules.av_started("hdr10")
+    await asyncio.sleep(0.3)
+    rules.stopped()
+    await asyncio.sleep(0.6)
+    assert tv.luna_calls == []
+    assert not rules._session
+    await rules.close()

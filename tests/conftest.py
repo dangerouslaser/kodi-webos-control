@@ -82,3 +82,12 @@ def _closed_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+@pytest.fixture(autouse=True)
+def fast_picture_rules(monkeypatch):
+    """The fake TV never switches signal; don't wait the real 8 s for it."""
+    from resources.lib import automations
+
+    monkeypatch.setattr(automations, "SIGNAL_SETTLE", 0.2)
+    monkeypatch.setattr(automations, "RETRY_DELAY", 0.05)

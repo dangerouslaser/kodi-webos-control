@@ -1,6 +1,6 @@
 # service.webostv: Kodi addon spec
 
-Oct 9, 2026 · @Bryan
+Oct 9, 2026 · @dangerouslaser
 
 ## Overview and goals
 

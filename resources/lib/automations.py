@@ -9,9 +9,16 @@ instead of the rules: a picture preset, screen off while playing, and/or
 turning the TV off when the video ends. Everything is undone on stop.
 
 Restore semantics: webOS keeps separate picture-mode memories for SDR and
-HDR signals. The preset to restore after playback is the one seen while
-Kodi was idle (the SDR GUI), not whatever the TV reported at the moment
-playback began, which may already be an HDR memory.
+HDR signals. The preset to restore after playback is the SDR preset seen
+while Kodi was idle (Kodi's GUI is SDR), not whatever the TV reported at
+the moment playback began or ended, which may be an HDR or Dolby Vision
+memory while the signal switches.
+
+Timing: a preset only applies once the TV is on the matching signal (the
+TV refuses an HDR preset on an SDR signal and vice versa). Before setting
+one, wait until the TV reports a preset of the same family (SDR, HDR or
+Dolby Vision), i.e. the signal has switched, then retry a few times if the
+TV still doesn't take it.
 """
 
 from __future__ import annotations
@@ -34,6 +41,12 @@ ARM_TTL = 60.0
 # Wait this long after a video ends before turning the TV off, so the next
 # playlist item can start.
 END_SETTLE = 5.0
+# Wait up to this long for the TV to switch to the signal a preset needs.
+SIGNAL_SETTLE = 8.0
+SIGNAL_POLL = 0.25
+# Attempts to set a preset, and the pause between them.
+SET_ATTEMPTS = 3
+RETRY_DELAY = 1.0
 
 
 def normalize_hdr_type(label: str) -> str | None:
@@ -54,7 +67,8 @@ class PlaybackRules:
     def __init__(self, controller: TvController, settings: Settings) -> None:
         self.controller = controller
         self.settings = settings
-        self.idle_mode: str | None = controller.picture_preset or None
+        current = controller.picture_preset
+        self.idle_mode: str | None = current if current and presets.family(current) == "sdr" else None
         self.applied = False
         self._session = False
         self._pending: asyncio.Task | None = None
@@ -63,6 +77,7 @@ class PlaybackRules:
         self._screen_off = False
         self._ended = False
         self._busy = False
+        self._stop_requested = False
         controller.picture_listeners.append(self._on_picture)
 
     def update(self, settings: Settings) -> None:
@@ -78,8 +93,10 @@ class PlaybackRules:
         }
 
     def _on_picture(self, mode: str) -> None:
-        # Only learn the "home" preset while nothing is playing.
-        if not self._session:
+        # Only learn the "home" preset while nothing is playing, and only an
+        # SDR one: right after playback the TV can briefly report its HDR or
+        # Dolby Vision memory while switching back.
+        if not self._session and presets.family(mode) == "sdr":
             self.idle_mode = mode
 
     def _schedule(self, coro_factory, delay: float | None = None) -> None:
@@ -127,6 +144,7 @@ class PlaybackRules:
             self._override = self._take_armed()
         self._session = True
         self._ended = False
+        self._stop_requested = False
         kind = normalize_hdr_type(hdr_label)
         log.debug(f"video started, HdrType={hdr_label!r} -> {kind}")
         if kind is None and not self._override:
@@ -140,6 +158,7 @@ class PlaybackRules:
             return
         log.debug("playback stopped")
         self._ended = False
+        self._stop_requested = True
         self._schedule(self._restore)
 
     def ended(self) -> None:
@@ -148,6 +167,7 @@ class PlaybackRules:
             return
         log.debug("playback ended")
         self._ended = True
+        self._stop_requested = True
         delay = None
         if self._override and self._override.get("power_off_at_end"):
             delay = max(END_SETTLE, self.settings.rules_debounce)
@@ -171,15 +191,42 @@ class PlaybackRules:
             return ""
         return self.presets().get(kind, "")
 
+    async def _set_when_ready(self, target: str, *, abort=lambda: False) -> str | None:
+        """Set a preset once the TV is on its signal; return an error or None."""
+        loop = asyncio.get_running_loop()
+        wanted = presets.family(target)
+        deadline = loop.time() + SIGNAL_SETTLE
+        while (
+            presets.family(self.controller.picture_preset or target) != wanted
+            and loop.time() < deadline
+            and not abort()
+        ):
+            await asyncio.sleep(SIGNAL_POLL)
+        if abort():
+            return "playback stopped"
+        error = ""
+        for attempt in range(SET_ATTEMPTS):
+            if self.controller.picture_preset == target:
+                return None
+            try:
+                await self.controller.set_picture_mode(target)
+                return None
+            except ActionError as err:
+                error = err.message
+            if attempt + 1 < SET_ATTEMPTS:
+                await asyncio.sleep(RETRY_DELAY)
+                if abort():
+                    return "playback stopped"
+        return error
+
     async def _apply(self, kind: str | None) -> None:
         if not self.controller.connected:
             return
         target = await self._target(kind)
         if target and self.controller.picture_preset != target:
-            try:
-                await self.controller.set_picture_mode(target)
-            except ActionError as err:
-                log.warning(f"{kind} playback: cannot set preset {target!r}: {err.message}")
+            error = await self._set_when_ready(target, abort=lambda: self._stop_requested)
+            if error:
+                log.warning(f"{kind} playback: cannot set preset {target!r}: {error}")
             else:
                 self.applied = True
                 log.info(f"{kind} playback: picture preset {target}")
@@ -201,11 +248,11 @@ class PlaybackRules:
             target = self.idle_mode
             if restore and target and self.controller.connected:
                 if self.controller.picture_preset != target:
-                    try:
-                        await self.controller.set_picture_mode(target)
+                    error = await self._set_when_ready(target)
+                    if error:
+                        log.warning(f"cannot restore preset {target!r}: {error}")
+                    else:
                         log.info(f"playback ended: restored picture preset {target}")
-                    except ActionError as err:
-                        log.warning(f"cannot restore preset {target!r}: {err.message}")
             if self._screen_off and self.controller.connected:
                 with contextlib.suppress(ActionError):
                     await self.controller.screen(True)
