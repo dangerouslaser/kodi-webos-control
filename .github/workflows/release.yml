@@ -1,0 +1,46 @@
+name: Release
+
+# Push a tag named v<version> (matching addon.xml) to build the add-on zip, attach it to a GitHub
+# release, and ask dangerouslaser.github.io (repository.dangerouslaser, also listed by repository.bald)
+# to rebuild its Kodi feed.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag matches addon.xml
+        id: version
+        run: |
+          version=$(python3 -c "import xml.etree.ElementTree as E; print(E.parse('addon.xml').getroot().get('version'))")
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match addon.xml version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Build the add-on zip
+        run: python3 scripts/build_zip.py
+
+      - name: Create GitHub release
+        run: |
+          gh release create "$GITHUB_REF_NAME" "dist/service.webostv-${{ steps.version.outputs.version }}.zip" \
+            --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger Kodi repository update
+        if: env.DISPATCH_TOKEN != ''
+        run: gh api repos/dangerouslaser/dangerouslaser.github.io/dispatches -f event_type=addon-released
+        env:
+          DISPATCH_TOKEN: ${{ secrets.REPO_DISPATCH_TOKEN }}
+          GH_TOKEN: ${{ secrets.REPO_DISPATCH_TOKEN }}
