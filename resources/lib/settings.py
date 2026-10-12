@@ -15,8 +15,21 @@ MOTION_MODES = ("", "off", "cinemaClear", "natural", "smooth")
 # Sound outputs a rule can pick; "" = leave unchanged.
 # Source-quality cleanup level; "" = leave unchanged.
 QUALITY_LEVELS = ("", "off", "low", "medium", "high")
-# Remote Bridge pointer speed (setting index -> factor).
-POINTER_SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+# Remote Bridge: how far the remote must move to bring the pointer back after
+# a button press (setting index -> distance in the TV's 1920-wide coordinates).
+POINTER_WAKES = (900, 300, 100, 25)
+# Remote Bridge scroll wheel: items per notch (setting index -> speed).
+WHEEL_SPEEDS = (1 / 3, 0.5, 1.0, 2.0)
+# The TV's own pointer settings (webOS key -> add-on setting, its values by
+# setting index; None: a toggle, "on"/"off"). The TV is the source of truth:
+# the Remote Bridge app reports them, and changes here are sent to the TV.
+TV_POINTER: dict[str, tuple[str, tuple[str, ...] | None]] = {
+    "pointerSpeed": ("tv_pointer_speed", ("slow", "normal", "fast")),
+    "pointerSize": ("tv_pointer_size", ("small", "medium", "large")),
+    "pointerShape": ("tv_pointer_shape", ("auto", "a", "b", "c", "d")),
+    "pointerAlignment": ("tv_pointer_align", None),
+    "cursorAutoRemover": ("tv_pointer_autohide", None),
+}
 SOUND_RULE_OUTPUTS = ("", "tv_speaker", "external_arc", "external_optical", "bt_soundbar", "headphone")
 
 
@@ -28,12 +41,44 @@ def _option(addon: xbmcaddon.Addon, key: str, options: tuple[str, ...]) -> str:
     return options[index] if 0 <= index < len(options) else options[0]
 
 
-def _speed(addon: xbmcaddon.Addon) -> float:
+def _wake(addon: xbmcaddon.Addon) -> int:
     try:
-        index = int(addon.getSetting("bridge_pointer_speed") or 2)
+        index = int(addon.getSetting("bridge_pointer_wake") or 1)
+    except ValueError:
+        index = 1
+    return POINTER_WAKES[index] if 0 <= index < len(POINTER_WAKES) else POINTER_WAKES[1]
+
+
+def _wheel_speed(addon: xbmcaddon.Addon) -> float:
+    try:
+        index = int(addon.getSetting("bridge_wheel_speed") or 2)
     except ValueError:
         index = 2
-    return POINTER_SPEEDS[index] if 0 <= index < len(POINTER_SPEEDS) else 1.0
+    return WHEEL_SPEEDS[index] if 0 <= index < len(WHEEL_SPEEDS) else 1.0
+
+
+def _tv_pointer(addon: xbmcaddon.Addon) -> tuple[tuple[str, str], ...]:
+    values = []
+    for key, (setting, options) in TV_POINTER.items():
+        if options is None:
+            values.append((key, "on" if addon.getSettingBool(setting) else "off"))
+        else:
+            values.append((key, _option(addon, setting, options)))
+    return tuple(values)
+
+
+def tv_pointer_to_addon(tv: dict[str, str]) -> dict[str, str]:
+    """The TV's reported pointer settings as add-on setting values (strings)."""
+    out = {}
+    for key, value in tv.items():
+        if key not in TV_POINTER:
+            continue
+        setting, options = TV_POINTER[key]
+        if options is None:
+            out[setting] = "true" if value == "on" else "false"
+        elif value in options:
+            out[setting] = str(options.index(value))
+    return out
 
 
 @dataclass(frozen=True)
@@ -65,7 +110,11 @@ class Settings:
     bridge_port: int = 9779
     bridge_token: str = ""
     bridge_pointer: bool = False
-    bridge_pointer_speed: float = 1.0
+    bridge_pointer_wake: int = 300
+    bridge_pointer_return: bool = True
+    bridge_wheel_speed: float = 1.0
+    # The TV's pointer settings as (webOS key, value) pairs (see TV_POINTER).
+    tv_pointer: tuple[tuple[str, str], ...] = ()
     # Motion smoothing by frame rate (blind writes: TVs won't report it)
     motion_film: str = ""
     motion_video: str = ""
@@ -115,7 +164,10 @@ class Settings:
             bridge_port=int(number("bridge_port", 9779)),
             bridge_token=addon.getSetting("bridge_token").strip(),
             bridge_pointer=addon.getSettingBool("bridge_pointer"),
-            bridge_pointer_speed=_speed(addon),
+            bridge_pointer_wake=_wake(addon),
+            bridge_pointer_return=addon.getSettingBool("bridge_pointer_return"),
+            bridge_wheel_speed=_wheel_speed(addon),
+            tv_pointer=_tv_pointer(addon),
             motion_film=_option(addon, "motion_film", MOTION_MODES),
             motion_video=_option(addon, "motion_video", MOTION_MODES),
             motion_restore=_option(addon, "motion_restore", MOTION_MODES),

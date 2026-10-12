@@ -313,7 +313,7 @@ def choose_volume() -> None:
 # Settings a skin page may change: bools toggle, options open a picker.
 EDITABLE_BOOLS = {
     "rules_enabled", "restore_on_stop", "resume_on_return", "transparent_control", "remote_bridge",
-    "bridge_pointer",
+    "bridge_pointer", "bridge_pointer_return", "tv_pointer_align", "tv_pointer_autohide",
     "toast_on_connect", "auto_discover", "loopback_fallback", "debug",
 }
 EDITABLE_OPTIONS = {
@@ -322,14 +322,19 @@ EDITABLE_OPTIONS = {
     **{key: (32410, 32411, 32412, 32413, 32414) for key in ("motion_film", "motion_video", "motion_restore")},
     **{key: (32420, 32421, 32422, 32423, 32424, 32425) for key in ("sound_video", "sound_livetv", "sound_music")},
     **{key: (32530, 32531, 32532, 32533, 32534) for key in ("quality_livetv", "quality_sd", "quality_hd")},
-    "bridge_pointer_speed": (32640, 32641, 32642, 32643, 32644, 32645),
+    "bridge_pointer_wake": (32640, 32641, 32642, 32643),
+    "bridge_wheel_speed": (32690, 32691, 32692, 32693),
+    "tv_pointer_speed": (32660, 32661, 32662),
+    "tv_pointer_size": (32663, 32664, 32665),
+    "tv_pointer_shape": (32666, 32667, 32668, 32669, 32670),
 }
 OPTION_HEADINGS = {
     "on_tv_off": 32203, "on_switch_away": 32204,
     "motion_film": 32401, "motion_video": 32402, "motion_restore": 32403,
     "sound_video": 32404, "sound_livetv": 32405, "sound_music": 32406,
     "quality_livetv": 32521, "quality_sd": 32522, "quality_hd": 32523,
-    "bridge_pointer_speed": 32606,
+    "bridge_pointer_wake": 32606, "bridge_wheel_speed": 32609,
+    "tv_pointer_speed": 32630, "tv_pointer_size": 32631, "tv_pointer_shape": 32632,
 }
 
 

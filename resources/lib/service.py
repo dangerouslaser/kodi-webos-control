@@ -7,6 +7,8 @@ the loop with run_coroutine_threadsafe; the loop thread owns TvController.
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import faulthandler
 import json
 import os
 import sys
@@ -26,7 +28,29 @@ from .settings import Settings
 ADDON_ID = "service.webostv"
 ADDON_NAME = "LG webOS TV"
 SHUTDOWN_TIMEOUT = 1.0
+SHUTDOWN_BUDGET = 3.0
+# A shutdown still running this long (Kodi kills at 5 s) dumps its threads here.
+STALL_AFTER = 4.0
+STALL_FILE = "shutdown-stall.txt"
 LOCK_FILE = "service.lock"
+# Home menu under the Remote Bridge pointer (see FocusKeeper).
+HOME_VIEW = "WebOS.HomeView"
+POINTER_CLICK = "WebOS.PointerClick"
+CLICK_FLAG_TIME = 1.0
+# Estuary LG's side menu rows: list top and row height (Home.xml, 9000).
+MENU_TOP, MENU_ROW = 40, 95
+POINTER_IDLE = 5.0  # Kodi hides its mouse after 5 s without movement
+# Settings side menus under the pointer (see FocusKeeper): the skin's pad over
+# the category column (SettingsCategory.xml, the LG TV page), its rows, and
+# the first category button (Kodi numbers its generated ones from -200).
+POINTING = "WebOS.Pointing"
+PAD_ROW = "WebOS.PadRow"
+SETTINGS_PAD = 9101
+PAD_TOP, PAD_ROW_HEIGHT = 130, 85
+LGTV_WINDOW, LGTV_FIRST_CATEGORY = 1120, 21
+KODI_FIRST_CATEGORY = -200
+# Where things are on screen (FocusKeeper.places), kept between restarts.
+PLACES_FILE = "pointer_places.json"
 # Remote Bridge wheel -> (gamepad trigger mapped to ScrollUp/ScrollDown in
 # gamepad.xml, remote button outside lists, remote button in a horizontal row).
 WHEEL = {"wheelup": ("leftanalogtrigger", "up", "left"),
@@ -96,6 +120,256 @@ def _press_button(name: str) -> None:
         "jsonrpc": "2.0", "id": 1, "method": "Input.ButtonEvent",
         "params": {"button": name, "keymap": "R1"},
     }))
+
+
+class FocusKeeper:
+    """What the Remote Bridge pointer does to focus (loop thread).
+
+    Over empty space Kodi unfocuses everything and forgets the control
+    (System.CurrentControlID goes empty); the next action would then go to
+    the window's default control (on Estuary's home screen: the side menu,
+    which opens). So remember the control and its item while the pointer
+    moves, and put focus back there when it comes to rest.
+
+    Home menu (Estuary LG): the home screen shows the side menu's selected
+    section, and hovering moves the selection. While the pointer is in use,
+    the section on show is frozen in WebOS.HomeView, so hovering only
+    highlights; a pointer click on a menu item switches to it (and
+    WebOS.PointerClick tells the skin not to open the library). The next
+    button press, or the pointer idling until Kodi hides it, puts the menu
+    selection back on that section and clears the property: buttons behave
+    as before.
+
+    Settings side menus: Kodi switches the category page as soon as a
+    category gets focus, so hovering down the list flicked through them.
+    While the pointer is in use (WebOS.Pointing), the skin covers the list
+    with a pad (SETTINGS_PAD): hovering highlights the row under the pointer
+    (WebOS.PadRow), a click focuses that category, and a button press hands
+    focus back to the list.
+    """
+
+    def __init__(self) -> None:
+        from .pointermap import PointerMap  # noqa: PLC0415
+
+        from . import storage  # noqa: PLC0415
+
+        self.places = PointerMap()  # where focused things are, from pointer positions
+        # Learned per skin: another skin (or version) has another layout.
+        self._skin = f"{xbmc.getSkinDir()} {xbmc.getInfoLabel('System.AddonVersion(' + xbmc.getSkinDir() + ')')}"
+        saved = storage.read_json(PLACES_FILE, {})
+        if isinstance(saved, dict) and saved.get("skin") == self._skin:
+            self.places.load(saved)
+        self._last: tuple[str, str, str] | None = None  # window, control, item
+        self._view: tuple[str, str] | None = None  # frozen section: id, item (1-based)
+        self._idle: asyncio.TimerHandle | None = None
+        self._click_reset: asyncio.TimerHandle | None = None
+        self._pointing = False
+        self._pad_row: int | None = None
+        self._y = -1.0
+
+    # -- pointer focus --
+
+    def track(self, x: float = -1, y: float = -1) -> None:
+        """The pointer moving, at x, y in skin coordinates (1920x1080)."""
+        self._pointer_used()
+        self._y = y
+        self._pad_hover(y)
+        if not self._menu_row_under(y):
+            self._menu_back_to_view()
+        control = xbmc.getInfoLabel("System.CurrentControlID")
+        if control and control != "0":
+            window = xbmc.getInfoLabel("System.CurrentWindow")
+            item = xbmc.getInfoLabel(f"Container({control}).CurrentItem")
+            self._last = (window, control, item)
+            if x >= 0 and y >= 0:
+                self.places.note((window, control, _pointer_context()), _slot(control), x, y)
+
+    def spot(self) -> tuple[float, float] | None:
+        """Where the focused item is on screen (skin coordinates), as far as the
+        pointer has shown; None if it hasn't been near."""
+        control = xbmc.getInfoLabel("System.CurrentControlID")
+        if not control or control == "0":
+            return None
+        window = xbmc.getInfoLabel("System.CurrentWindow")
+        return self.places.where((window, control, _pointer_context()), _slot(control))
+
+    def restore(self) -> None:
+        control = xbmc.getInfoLabel("System.CurrentControlID")
+        if control and control != "0":
+            return  # something has focus
+        if self._last is None or self._last[0] != xbmc.getInfoLabel("System.CurrentWindow"):
+            return
+        _window, control, item = self._last
+        if item.isdigit() and int(item) > 0:
+            xbmc.executebuiltin(f"SetFocus({control},{int(item) - 1},absolute)")
+        else:
+            xbmc.executebuiltin(f"SetFocus({control})")
+
+    # -- home menu --
+
+    def click(self) -> None:
+        """A pointer click, before Kodi gets it."""
+        self._pointer_used()
+        self._pad_click()
+        if self._view is None or not _menu_has_focus():
+            return
+        selection = _home_selection()
+        if selection is None:
+            return
+        self._view = selection
+        home = xbmcgui.Window(10000)
+        home.setProperty(HOME_VIEW, selection[0])
+        home.setProperty(POINTER_CLICK, "true")
+        if self._click_reset is not None:
+            self._click_reset.cancel()
+        self._click_reset = asyncio.get_running_loop().call_later(
+            CLICK_FLAG_TIME, lambda: xbmcgui.Window(10000).clearProperty(POINTER_CLICK))
+
+    def key(self) -> None:
+        """A button press, before Kodi gets it: back to button behaviour."""
+        self._release()
+        if self._pointing:
+            self._pointing = False
+            if xbmc.getCondVisibility(f"Control.HasFocus({SETTINGS_PAD})"):
+                xbmc.executebuiltin("SetFocus(3)")  # the category on show
+            home = xbmcgui.Window(10000)
+            home.clearProperty(POINTING)
+            home.clearProperty(PAD_ROW)
+            self._pad_row = None
+
+    # -- settings side menus --
+
+    def _pad_hover(self, y: float) -> None:
+        row = self._pad_row_at(y) if xbmc.getCondVisibility(f"Control.HasFocus({SETTINGS_PAD})") else None
+        if row != self._pad_row:
+            self._pad_row = row
+            home = xbmcgui.Window(10000)
+            if row is None:
+                home.clearProperty(PAD_ROW)
+            else:
+                home.setProperty(PAD_ROW, str(row))
+
+    def _pad_click(self) -> None:
+        if not xbmc.getCondVisibility(f"Control.HasFocus({SETTINGS_PAD})"):
+            return
+        row = self._pad_row_at(self._y)
+        if row is None:
+            return
+        first = LGTV_FIRST_CATEGORY if xbmc.getCondVisibility(
+            f"Window.IsActive({LGTV_WINDOW})") else KODI_FIRST_CATEGORY
+        xbmc.executebuiltin(f"SetFocus({first + row})")
+
+    def _pad_row_at(self, y: float) -> int | None:
+        count = xbmc.getInfoLabel("Container(3).NumItems")
+        if y < PAD_TOP or not count.isdigit():
+            return None
+        row = int((y - PAD_TOP) // PAD_ROW_HEIGHT)
+        return row if row < int(count) else None
+
+    def close(self) -> None:
+        """Service stopping: no GUI calls (see WebOsService.shutdown)."""
+        from . import storage  # noqa: PLC0415
+
+        for handle in (self._idle, self._click_reset):
+            if handle is not None:
+                handle.cancel()
+        try:
+            storage.write_json(PLACES_FILE, {"skin": self._skin, **self.places.dump()})
+        except OSError as err:
+            log.warning(f"cannot save pointer places: {err}")
+
+    def _pointer_used(self) -> None:
+        if not self._pointing:
+            self._pointing = True
+            xbmcgui.Window(10000).setProperty(POINTING, "true")
+        if self._idle is not None:
+            self._idle.cancel()
+        self._idle = asyncio.get_running_loop().call_later(POINTER_IDLE, self._release)
+        if self._view is None and xbmc.getCondVisibility("Window.IsActive(home)"):
+            self._view = _home_selection()
+            if self._view is not None:
+                xbmcgui.Window(10000).setProperty(HOME_VIEW, self._view[0])
+
+    def _menu_row_under(self, y: float) -> bool:
+        """Over the open menu's label area (the hover pad, 9100), the row at height
+        y gets the highlight, as if hovered: the menu's own hit area is its icons."""
+        if self._view is None or y < 0 or not xbmc.getCondVisibility("Control.HasFocus(9100)"):
+            return False
+        current, position = (xbmc.getInfoLabel(f"Container(9000).{label}")
+                             for label in ("CurrentItem", "Position"))
+        count = xbmc.getInfoLabel("Container(9000).NumItems")
+        if not (current.isdigit() and position.isdigit() and count.isdigit()):
+            return False
+        row = int((y - MENU_TOP) // MENU_ROW)
+        target = int(current) - int(position) + row  # first row on screen + row
+        if row < 0 or not 1 <= target <= int(count):
+            return True  # in the sidebar, off the rows: leave the highlight
+        if target != int(current):
+            xbmc.executebuiltin(f"Control.Move(9000,{target - int(current)})")
+        return True
+
+    def _menu_back_to_view(self) -> None:
+        """Pointer off the menu: its selection (the collapsed bar's highlight) back
+        on the section on show, not the last one hovered."""
+        if self._view is None or _menu_has_focus():
+            return
+        current = xbmc.getInfoLabel("Container(9000).CurrentItem")
+        item = self._view[1]
+        if item.isdigit() and current.isdigit() and item != current:
+            xbmc.executebuiltin(f"Control.Move(9000,{int(item) - int(current)})")
+
+    def _release(self) -> None:
+        if self._idle is not None:
+            self._idle.cancel()
+            self._idle = None
+        if self._view is None:
+            return
+        _section, item = self._view
+        self._view = None
+        current = xbmc.getInfoLabel("Container(9000).CurrentItem")
+        if item.isdigit() and current.isdigit() and item != current:
+            xbmc.executebuiltin(f"Control.Move(9000,{int(item) - int(current)})")
+        xbmcgui.Window(10000).clearProperty(HOME_VIEW)
+
+
+def _slot(control: str) -> tuple[int, int] | None:
+    """The focused item's slot in the visible part of a container: (row, column)
+    in a panel, (position, 0) in a list; None for a plain control."""
+    row, column = (xbmc.getInfoLabel(f"Container({control}).{label}") for label in ("Row", "Column"))
+    if row.isdigit() and column.isdigit():
+        return int(row), int(column)
+    position = xbmc.getInfoLabel(f"Container({control}).Position")
+    if position.isdigit() and xbmc.getInfoLabel(f"Container({control}).NumItems"):
+        return int(position), 0
+    return None
+
+
+def _pointer_context() -> str:
+    """What moves controls as a whole, so they're remembered per arrangement: a
+    skin that sets Window(Home).Property(WebOS.PointerContext) provides it as
+    the variable WebOSPointerContext (Estuary LG: how far its home rows scrolled)."""
+    if not xbmc.getInfoLabel("Window(Home).Property(WebOS.PointerContext)"):
+        return ""
+    return xbmc.getInfoLabel("$VAR[WebOSPointerContext]")
+
+
+def _menu_has_focus() -> bool:
+    """The side menu (9000) or the open sidebar's hover pad over its labels (9100)."""
+    return any(xbmc.getCondVisibility(f"Control.HasFocus({control})") for control in (9000, 9100))
+
+
+def _home_selection() -> tuple[str, str] | None:
+    section = xbmc.getInfoLabel("Container(9000).ListItem.Property(id)")
+    item = xbmc.getInfoLabel("Container(9000).CurrentItem")
+    return (section, item) if section and item.isdigit() else None
+
+
+def _at_row_end(control: str, direction: str) -> bool:
+    item = xbmc.getInfoLabel(f"Container({control}).CurrentItem")
+    count = xbmc.getInfoLabel(f"Container({control}).NumItems")
+    if not (item.isdigit() and count.isdigit()):
+        return False
+    return int(item) <= 1 if direction == "left" else int(item) >= int(count)
 
 
 def _skin_says(prop: str) -> bool:
@@ -178,6 +452,7 @@ class WebOsService:
         self.watcher: Any = None
         self.bridge: Any = None
         self.mouse: Any = None
+        self.focus: Any = None
         self._inputs: tuple = ()
         self._launcher_key: tuple = ()
         self._lock_fd: int | None = None
@@ -221,6 +496,11 @@ class WebOsService:
         from .watcher import TvWatcher  # noqa: PLC0415
 
         self.publisher = PropertyPublisher()
+        # Pointer state (a frozen Home section, the settings pad) from when the
+        # service last stopped.
+        home = xbmcgui.Window(10000)
+        for prop in (HOME_VIEW, POINTER_CLICK, POINTING, PAD_ROW):
+            home.clearProperty(prop)
         self.overlay = Overlay(self.forward, lambda: self.settings.kodi_input)
         self.loop = asyncio.new_event_loop()
         self.thread = threading.Thread(target=self._loop_main, name="webostv-loop", daemon=True)
@@ -241,8 +521,10 @@ class WebOsService:
             self.sound = SoundRules(self.controller, self.settings)
             self.watcher = TvWatcher(self.controller, self.settings, _KodiSide(self))
             self.mouse = EventServerMouse(_eventserver_port())
+            self.focus = FocusKeeper()
             self.bridge = RemoteBridge(self.settings, self._remote_button, self._kodi_on_screen,
-                                       self._bridge_changed, self.mouse, self._tv_cursor)
+                                       self._bridge_changed, self.mouse, self._tv_cursor,
+                                       self.focus, self._tv_pointer_settings)
             await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
@@ -295,37 +577,65 @@ class WebOsService:
         """
         log.info("service stopping")
         self.closing = True
+        self._watch_shutdown()
         if self.publisher is not None:
             self.publisher.close()
         if self.loop is None:
             return
-        for part in (self.bridge, self.watcher, self.rules, self.sound):
-            if part is None:
-                continue
-            try:
-                self._submit(part.close()).result(timeout=SHUTDOWN_TIMEOUT)
-            except Exception:  # noqa: BLE001
-                pass
+        if self.focus is not None:
+            self.loop.call_soon_threadsafe(self.focus.close)
         if self.overlay is not None:
-            self.overlay.close()
+            self.overlay.close(wait=False)
+        # Kodi kills a service that takes 5 s to stop (and then never restarts
+        # it), so everything stops together within SHUTDOWN_BUDGET.
+        try:
+            self._submit(self._stop_parts()).result(timeout=SHUTDOWN_BUDGET)
+        except Exception as err:  # noqa: BLE001
+            log.warning(f"service parts did not stop cleanly: {err!r}")
+        self.loop.call_soon_threadsafe(self.loop.stop)
+        if self.thread is not None:
+            self.thread.join(0.5)
+        self._release_instance_lock()
+        self._unwatch_shutdown()
+        self.monitor = None
+        self.player = None
+        self.loop = None
+
+    def _watch_shutdown(self) -> None:
+        """If stopping nears Kodi's 5 s limit, save every thread's stack to
+        shutdown-stall.txt (add-on data) to show what it's waiting on."""
+        from . import storage  # noqa: PLC0415
+
+        try:
+            self._stall_file = open(storage.data_path(STALL_FILE), "w")  # noqa: SIM115
+            faulthandler.dump_traceback_later(STALL_AFTER, file=self._stall_file)
+        except (OSError, ValueError, RuntimeError) as err:
+            log.warning(f"cannot watch the shutdown: {err!r}")
+
+    def _unwatch_shutdown(self) -> None:
+        """Stopped in time: nothing to report."""
+        faulthandler.cancel_dump_traceback_later()
+        stall = getattr(self, "_stall_file", None)
+        if stall is not None:
+            stall.close()
+            with contextlib.suppress(OSError):
+                os.remove(stall.name)
+
+    async def _stop_parts(self) -> None:
+        """Loop thread: stop the parts, then the TV connection, each bounded."""
+        parts = [p for p in (self.bridge, self.watcher, self.rules, self.sound) if p is not None]
+        with contextlib.suppress(asyncio.TimeoutError):
+            await asyncio.wait_for(asyncio.gather(*(p.close() for p in parts), return_exceptions=True),
+                                   SHUTDOWN_TIMEOUT)
         if self.controller is not None:
             try:
-                self._submit(self.controller.stop()).result(timeout=SHUTDOWN_TIMEOUT)
+                await asyncio.wait_for(self.controller.stop(), SHUTDOWN_TIMEOUT)
             except Exception as err:  # noqa: BLE001
                 log.warning(f"controller stop did not finish cleanly: {err!r}")
         # getaddrinfo runs in the default executor; its worker thread is not
         # a daemon, and Kodi waits for it (then kills the script after 5 s).
-        try:
-            self._submit(self.loop.shutdown_default_executor()).result(timeout=SHUTDOWN_TIMEOUT)
-        except Exception:  # noqa: BLE001
-            pass
-        self.loop.call_soon_threadsafe(self.loop.stop)
-        if self.thread is not None:
-            self.thread.join(SHUTDOWN_TIMEOUT)
-        self._release_instance_lock()
-        self.monitor = None
-        self.player = None
-        self.loop = None
+        with contextlib.suppress(Exception):
+            await asyncio.wait_for(asyncio.get_running_loop().shutdown_default_executor(), 0.5)
 
     def _submit(self, coro: Any) -> Future:
         assert self.loop is not None
@@ -449,8 +759,23 @@ class WebOsService:
         task = asyncio.ensure_future(install())
         task.add_done_callback(_log_task_error)
 
+    def _tv_pointer_settings(self, tv: dict[str, str]) -> None:
+        """Loop thread: the TV reported its pointer settings; mirror them in ours
+        (the TV is the source of truth; a change here is sent there)."""
+        from .settings import tv_pointer_to_addon  # noqa: PLC0415
+
+        if self.closing:
+            return
+        addon = xbmcaddon.Addon(ADDON_ID)
+        for key, value in tv_pointer_to_addon(tv).items():
+            if addon.getSetting(key) != value:
+                addon.setSetting(key, value)
+
     def _remote_button(self, name: str) -> None:
         """Loop thread: a Remote Bridge button; the wheel scrolls what has focus."""
+        if name == "kodihome":  # the remote's Home (held: the TV's home)
+            xbmc.executebuiltin("ActivateWindow(home)")
+            return
         wheel = WHEEL.get(name)
         if wheel is None:
             _press_button(name)
@@ -458,8 +783,10 @@ class WebOsService:
         trigger, button, sideways = wheel
         control = xbmc.getInfoLabel("System.CurrentControlID")
         if _skin_says("WebOS.WheelSideways"):
-            # A horizontal row (the skin says which): one item per notch.
-            _press_button(sideways)
+            # A horizontal row (the skin says which): one item per notch, stopping
+            # at its ends (left from the first item would leave the row).
+            if not _at_row_end(control, sideways):
+                _press_button(sideways)
         elif _skin_says("WebOS.WheelButtons"):
             # A grid panel, whose analog scroll needs several notches per row.
             _press_button(button)

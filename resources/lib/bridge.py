@@ -19,8 +19,16 @@ Protocol, one JSON object per line:
     <- {"pos": [x, y]}                  while taken over with the pointer on
     -> {"grab": bool, "consume": [codes], "pointer": bool}   on change and every 2 s
     <- {"cursor": {"point", "hover", "hold", "drag": base64 PNG}, "hotspot": rule}
-                                        the TV's own pointer images, once per
-                                        connection (see cursor.py)
+                                        the TV's own pointer images, on connecting
+                                        and when its size or shape changes (cursor.py)
+    <- {"tv": {setting: value}}         the TV's pointer settings (settings.TV_POINTER),
+                                        on connecting and on every change (bridge 0.3)
+    -> {"set_tv": {setting: value}}     change them on the TV
+    -> {"warp": [x, y]}                 move the TV's pointer (the remote's position)
+    <- {"warped": [x, y]}               done (bridge 0.4.2)
+
+The pointer moves 1:1 with the TV's: its speed, alignment and auto-hide are
+the TV's own pointer settings, changed on the TV from here.
 """
 
 from __future__ import annotations
@@ -43,17 +51,36 @@ REPO_URL = "https://dangerouslaser.github.io/webos/repo.json"
 
 HELLO_TIMEOUT = 5.0
 HEARTBEAT = 2.0
-# Pointer speeds other than 1 move the cursor by the remote's motion, scaled;
-# a pause this long starts a new stroke from where the cursor is.
-STROKE_GAP = 0.4
-# After a button press the pointer stays hidden until the remote moves this
-# far (in the TV's 1920-wide coordinates); hand jitter doesn't bring it back.
-POINTER_WAKE = 80
+# After a button press the pointer stays hidden until the remote moves
+# settings.bridge_pointer_wake (in the TV's 1920-wide coordinates), so hand
+# jitter doesn't bring it back. It comes back on what the buttons focused:
+# once they've settled (PREWARP_DELAY), the TV's pointer is moved there while
+# Kodi's stays hidden, and the TV confirms ("warped"), so the pointer wakes
+# from there with no jump. If that didn't happen (the remote was asleep),
+# it's moved on waking, and Kodi's stays hidden until the TV's arrives near
+# there (or WARP_TIME passes).
+PREWARP_DELAY = 0.25
+WARP_TIME = 0.6
+WARP_NEAR = 120
+# The pointer counts as resting after this long without moving. Over empty
+# space nothing has focus, and Kodi would hand the next action to the window's
+# default control (on Estuary's home screen: the side menu, which then opens),
+# so focus goes back to the control the pointer was last over.
+POINTER_REST = 0.4
+# While the pointer moves, what it's over is noted at most this often.
+FOCUS_TRACK = 0.1
+# Kodi hides its mouse after this long without movement; till then OK counts
+# as a pointer click (the Magic Remote sends OK, not BTN_LEFT, on some TVs).
+POINTER_VISIBLE = 5.0
+OK_KEYS = frozenset({28, 352})
 # The Magic Remote's pointer click (BTN_LEFT); only used with the pointer on.
 POINTER_CLICK = 272
 # Lines carry the TV's cursor images (a few KB each).
 MAX_LINE = 1024 * 1024
 CURSOR_MAX = 256 * 1024
+# Wheel notches in one direction this close together add up (the slower wheel
+# speeds need several per item); a longer pause starts over.
+WHEEL_GAP = 1.0
 # Holding OK this long opens the context menu instead of selecting.
 LONG_PRESS = 0.6
 # Held arrows repeat only on the TV's own repeat events (every 50 ms after
@@ -64,6 +91,12 @@ REPEAT_MIN_INTERVAL = 0.08
 # Not remote buttons: the service scrolls the focused list along its own
 # direction (left/right in a horizontal row).
 WHEEL_UP, WHEEL_DOWN = "wheelup", "wheeldown"
+# Home: Kodi's home screen; held, the TV's (the bridge presses Home for the
+# TV: TV_KEY + code). Only while the remote is taken over: otherwise the TV
+# gets Home anyway.
+KODI_HOME = "kodihome"
+TV_KEY = "tvkey:"
+HOME_KEYS = frozenset({102, 172, 773})  # KEY_HOME, KEY_HOMEPAGE, the Magic Remote's Home
 
 # Linux input key codes (linux/input-event-codes.h) -> buttons of Kodi's
 # remote keymap (remote.xml, "R1"). Kodi resolves them per window, like a
@@ -94,14 +127,17 @@ KEY_BUTTONS: dict[int, str] = {
     398: "red", 399: "green", 400: "yellow", 401: "blue",
     402: "channelplus",   # KEY_CHANNELUP
     403: "channelminus",  # KEY_CHANNELDOWN
-    # LG Magic Remote (seen on a G5, webOS 10)
+    # LG Magic Remote (seen on a G5, webOS 10). Its wheel is REL_WHEEL
+    # ({"wheel"}); 1198/1199 are its pointer waking/idling, which the bridge
+    # keeps for the TV.
     412: "back",          # KEY_PREVIOUS: the Back button
-    1198: WHEEL_UP,       # scroll wheel, one press per notch
-    1199: WHEEL_DOWN,
+    102: KODI_HOME,       # KEY_HOME
+    172: KODI_HOME,       # KEY_HOMEPAGE
+    773: KODI_HOME,       # LG Magic Remote Home (seen on a B4, webOS 9)
 }
 REPEATING = frozenset({"up", "down", "left", "right"})
 # Held OK: "menu" is the context menu in lists and the OSD in fullscreen video.
-LONG_PRESS_BUTTONS = {"select": "menu"}
+LONG_PRESS_BUTTONS = {"select": "menu", KODI_HOME: TV_KEY}
 
 KEY_UP, KEY_DOWN, KEY_REPEAT = 0, 1, 2
 
@@ -109,9 +145,12 @@ KEY_UP, KEY_DOWN, KEY_REPEAT = 0, 1, 2
 class KeyMapper:
     """Turns press/release events into Kodi remote buttons (loop thread)."""
 
-    def __init__(self, execute: Callable[[str], None], active: Callable[[], bool]) -> None:
+    def __init__(self, execute: Callable[[str], None], active: Callable[[], bool],
+                 wheel_speed: Callable[[], float] = lambda: 1.0) -> None:
         self._execute = execute
         self._active = active
+        self._wheel_speed = wheel_speed  # items per notch
+        self._wheel = (0.0, 0.0)  # notches not yet acted on (signed), last notch time
         self._long: dict[int, asyncio.TimerHandle] = {}
         self._long_fired: set[int] = set()
         self._last_repeat: dict[int, float] = {}
@@ -134,8 +173,15 @@ class KeyMapper:
     def wheel(self, steps: int) -> None:
         if not self._active():
             return
-        action = WHEEL_UP if steps > 0 else WHEEL_DOWN
-        for _ in range(min(abs(steps), 5)):
+        now = asyncio.get_running_loop().time()
+        pending, last = self._wheel
+        if now - last > WHEEL_GAP or pending * steps < 0:
+            pending = 0.0  # a pause or a change of direction starts over
+        pending += steps * self._wheel_speed()
+        items = int(pending)  # toward zero: whole items only
+        self._wheel = (pending - items, now)
+        action = WHEEL_UP if items > 0 else WHEEL_DOWN
+        for _ in range(min(abs(items), 5)):
             self._execute(action)
 
     def release_all(self) -> None:
@@ -179,7 +225,8 @@ class KeyMapper:
         self._long.pop(code, None)
         self._long_fired.add(code)
         if self._active():
-            self._execute(LONG_PRESS_BUTTONS[action])
+            long_action = LONG_PRESS_BUTTONS[action]
+            self._execute(f"{TV_KEY}{code}" if long_action == TV_KEY else long_action)
 
     def _cancel(self, code: int) -> None:
         handle = self._long.pop(code, None)
@@ -196,13 +243,22 @@ class RemoteBridge:
                  on_screen: Callable[[], bool],
                  on_change: Callable[[str], None] | None = None,
                  mouse: Any = None,
-                 on_cursor: Callable[[dict[str, bytes], str], None] | None = None) -> None:
+                 on_cursor: Callable[[dict[str, bytes], str], None] | None = None,
+                 focus: Any = None,
+                 on_tv: Callable[[dict[str, str]], None] | None = None) -> None:
         self.settings = settings
-        self.mapper = KeyMapper(execute, on_screen)
+        self.mapper = KeyMapper(self._run, on_screen, lambda: self.settings.bridge_wheel_speed)
+        self._execute = execute
         self._on_screen = on_screen
         self._on_change = on_change
         self._mouse = mouse
         self._on_cursor = on_cursor
+        # .track() while the pointer moves, .restore() when it rests, .spot()
+        # where the focused item is (skin coordinates) or None.
+        self._focus = focus
+        self._on_tv = on_tv  # the TV's pointer settings, as reported
+        self._tracked_at = 0.0
+        self._resting: asyncio.TimerHandle | None = None
         self._published: str | None = None
         self._heartbeat: asyncio.Task | None = None
         self._server: asyncio.Server | None = None
@@ -212,9 +268,19 @@ class RemoteBridge:
     async def start(self) -> None:
         await self._apply()
 
+    def _run(self, action: str) -> None:
+        if action.startswith(TV_KEY):
+            for writer, info in self._clients.items():
+                if info.get("grab"):
+                    log.info(f"remote bridge: button {action[len(TV_KEY):]} for the TV")
+                    self._write(writer, {"press": int(action[len(TV_KEY):])})
+            return
+        self._execute(action)
+
     def update(self, settings: Settings) -> None:
         self.settings = settings
         self.refresh()
+        self._push_tv_settings()
         task = asyncio.ensure_future(self._apply())
         task.add_done_callback(_log_error)
 
@@ -254,8 +320,38 @@ class RemoteBridge:
             await asyncio.sleep(HEARTBEAT)
             for writer, info in list(self._clients.items()):
                 self._send_grab(writer, info)
+                self._keep_pointer(info)
             if self._mouse is not None and self.settings.bridge_pointer:
                 self._mouse.ping()
+
+    def _keep_pointer(self, info: dict[str, Any]) -> None:
+        """The TV's auto-hide off: Kodi hides an idle mouse after 5 s; nudge it
+        by a pixel and back so it stays up till a button hides it."""
+        if (info.get("tv", {}).get("cursorAutoRemover") != "off" or self._mouse is None
+                or not self._pointer_visible(info) or not self._on_screen()):
+            return
+        x, y = info["shown"]
+        max_x, max_y = info["pointer"]
+        info["nudge"] = not info.get("nudge")
+        self._mouse.move(x + (1 if info["nudge"] else 0), y, max_x, max_y)
+        info["shown_at"] = asyncio.get_running_loop().time()
+
+    def _push_tv_settings(self) -> None:
+        """Settings changed here that differ from what the TV reported: set them there."""
+        wanted = dict(self.settings.tv_pointer)
+        for writer, info in self._clients.items():
+            tv = info.get("tv")
+            if tv is None:
+                continue  # not reported yet (or an older bridge): the TV's win
+            changes = {k: v for k, v in wanted.items() if k in tv and tv[k] != v}
+            if changes:
+                log.info(f"remote bridge: TV pointer settings {changes}")
+                tv.update(changes)  # the TV echoes them back
+                self._write(writer, {"set_tv": changes})
+
+    def _write(self, writer: asyncio.StreamWriter, msg: dict[str, Any]) -> None:
+        with contextlib.suppress(OSError, RuntimeError):
+            writer.write(json.dumps(msg).encode() + b"\n")
 
     @property
     def state(self) -> str:
@@ -316,7 +412,7 @@ class RemoteBridge:
                 return
             writer.write(b'{"ok": true}\n')
             await writer.drain()
-            info = {"version": str(hello.get("version", "")), "peer": peer,
+            info = {"version": str(hello.get("version", "")), "peer": peer, "writer": writer,
                     "pointer": _pointer_range(hello.get("pointer"))}
             self._clients[writer] = info
             self._send_grab(writer, info)
@@ -364,14 +460,36 @@ class RemoteBridge:
             except (TypeError, ValueError):
                 return
             log.debug(f"remote bridge: key {code} {value} (device {msg.get('dev')})")
+            if code in HOME_KEYS and not info.get("grab"):
+                return  # the TV has it (and shows its home)
+            if code in OK_KEYS and self._pointer_visible(info):
+                code = POINTER_CLICK  # pointing: OK is a click
             if code == POINTER_CLICK:
                 if self.settings.bridge_pointer:
+                    if value == KEY_DOWN and self._focus is not None and self._on_screen():
+                        self._focus.click()
                     self.mapper.key(28, value)  # a click selects what the pointer is over
                 return
+            if value == KEY_DOWN:
+                self._pointer_rest()  # before the button, so it reaches a focused control
+                if self._focus is not None and code in KEY_BUTTONS and self._on_screen():
+                    self._focus.key()
             if value == KEY_DOWN and code in KEY_BUTTONS:
-                # Kodi hides its mouse on a button press; keep it hidden.
-                info["hidden_at"] = info.get("raw") or (-POINTER_WAKE, -POINTER_WAKE)
+                self._hide_pointer(info)
             self.mapper.key(code, value)
+        elif "tv" in msg:
+            if isinstance(msg["tv"], dict):
+                tv = {str(k): str(v) for k, v in msg["tv"].items()}
+                info["tv"] = tv
+                log.info(f"remote bridge: TV pointer settings {tv}")
+                if self._on_tv is not None:
+                    self._on_tv(tv)
+        elif "warped" in msg:
+            with contextlib.suppress(TypeError, ValueError):
+                spot = tuple(int(v) for v in msg["warped"])
+                if info.get("hidden_at") is not None and spot == info.get("prewarp"):
+                    info["hidden_at"] = spot  # wakes from the focused item
+                    info["prewarped"] = True
         elif "cursor" in msg:
             if self._on_cursor is not None and isinstance(msg["cursor"], dict):
                 self._on_cursor(_decode_images(msg["cursor"]), str(msg.get("hotspot") or "tip"))
@@ -382,34 +500,96 @@ class RemoteBridge:
                 x, y = (int(v) for v in msg["pos"])
             except (TypeError, ValueError):
                 return
+            loop = asyncio.get_running_loop()
+            max_x, max_y = info["pointer"]
+            info["raw"] = (x, y)
             hidden_at = info.get("hidden_at")
             if hidden_at is not None:
-                if abs(x - hidden_at[0]) + abs(y - hidden_at[1]) < POINTER_WAKE:
+                wake = self.settings.bridge_pointer_wake
+                if abs(x - hidden_at[0]) + abs(y - hidden_at[1]) < wake:
                     return
                 info.pop("hidden_at")
-            max_x, max_y = info["pointer"]
-            cx, cy = self._cursor(info, x, y, max_x, max_y)
-            self._mouse.move(round(cx), round(cy), max_x, max_y)
+                target = None if info.pop("prewarped", False) else self._focused_spot(info, max_x, max_y)
+                if target is not None:
+                    info["warp"] = (*target, loop.time() + WARP_TIME)
+                    self._write(info["writer"], {"warp": list(target)})
+            warp = info.get("warp")
+            if warp is not None:
+                tx, ty, until = warp
+                if abs(x - tx) + abs(y - ty) >= WARP_NEAR and loop.time() < until:
+                    return  # from before the TV moved its pointer
+                info.pop("warp")
+            self._show_pointer(info, x, y)
+            if self._focus is not None and loop.time() - self._tracked_at >= FOCUS_TRACK:
+                self._tracked_at = loop.time()
+                # In Kodi's 1920x1080 skin coordinates.
+                self._focus.track(x * 1920 / max_x, y * 1080 / max_y)
+            if self._resting is not None:
+                self._resting.cancel()
+            self._resting = loop.call_later(POINTER_REST, self._pointer_rest)
         elif "wheel" in msg:
             with contextlib.suppress(TypeError, ValueError):
-                info["hidden_at"] = info.get("raw") or (-POINTER_WAKE, -POINTER_WAKE)
+                self._hide_pointer(info)
+                if self._focus is not None and self._on_screen():
+                    self._focus.key()
                 self.mapper.wheel(int(msg["wheel"]))
 
 
-    def _cursor(self, info: dict[str, Any], x: int, y: int, max_x: int, max_y: int) -> tuple[float, float]:
-        """Where Kodi's cursor goes for the remote's absolute position x, y."""
-        speed = self.settings.bridge_pointer_speed
-        now = asyncio.get_running_loop().time()
-        last, last_at, cursor = info.get("raw"), info.get("raw_at", 0.0), info.get("cursor")
-        info["raw"], info["raw_at"] = (x, y), now
-        if speed == 1.0 or cursor is None:
-            cursor = (float(x), float(y))
-        elif last is not None and now - last_at <= STROKE_GAP:
-            cursor = (min(max(cursor[0] + (x - last[0]) * speed, 0.0), float(max_x)),
-                      min(max(cursor[1] + (y - last[1]) * speed, 0.0), float(max_y)))
-        # else: a new stroke starts where the cursor already is
-        info["cursor"] = cursor
-        return cursor
+    def _hide_pointer(self, info: dict[str, Any]) -> None:
+        """Kodi hides its mouse on a button press; keep it hidden till the remote
+        moves, and line the TV's pointer up with the focus once it settles."""
+        far = -10 * self.settings.bridge_pointer_wake
+        if not info.get("prewarped"):
+            info["hidden_at"] = info.get("raw") or (far, far)
+        info.pop("warp", None)
+        info.pop("prewarp", None)
+        info["prewarped"] = False
+        if info.get("prewarp_timer") is not None:
+            info["prewarp_timer"].cancel()
+        info["prewarp_timer"] = asyncio.get_running_loop().call_later(
+            PREWARP_DELAY, self._prewarp, info)
+
+    def _prewarp(self, info: dict[str, Any]) -> None:
+        info["prewarp_timer"] = None
+        if info.get("hidden_at") is None or info.get("writer") is None:
+            return  # already back
+        target = self._focused_spot(info, *info["pointer"])
+        if target is not None:
+            info["prewarp"] = target
+            self._write(info["writer"], {"warp": list(target)})
+
+    def _show_pointer(self, info: dict[str, Any], x: int, y: int) -> None:
+        max_x, max_y = info["pointer"]
+        self._mouse.move(x, y, max_x, max_y)
+        info["shown"] = (x, y)
+        info["shown_at"] = asyncio.get_running_loop().time()
+
+    def _focused_spot(self, info: dict[str, Any], max_x: int, max_y: int) -> tuple[int, int] | None:
+        """Where the buttons left focus, in the remote's coordinates (or None)."""
+        if not (self.settings.bridge_pointer_return and self._focus is not None and self._on_screen()):
+            return None
+        if "tv" not in info:
+            return None  # a bridge before 0.3 can't move the TV's pointer
+        spot = self._focus.spot()
+        if spot is None:
+            return None
+        return round(spot[0] * max_x / 1920), round(spot[1] * max_y / 1080)
+
+    def _pointer_visible(self, info: dict[str, Any]) -> bool:
+        """Whether Kodi is showing the pointer: moved lately, and not since hidden by a button."""
+        if not self.settings.bridge_pointer or info.get("hidden_at") is not None:
+            return False
+        shown_at = info.get("shown_at")
+        return shown_at is not None and asyncio.get_running_loop().time() - shown_at < POINTER_VISIBLE
+
+    def _pointer_rest(self) -> None:
+        """The pointer stopped (or a button came first): refocus, once per movement."""
+        if self._resting is None:
+            return
+        self._resting.cancel()
+        self._resting = None
+        if self._focus is not None and self._on_screen():
+            self._focus.restore()
 
 
 def _decode_images(raw: dict[str, Any]) -> dict[str, bytes]:

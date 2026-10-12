@@ -94,13 +94,19 @@ def tip(width: int, height: int, pixels: bytearray, threshold: int = 128) -> tup
     return 0, 0
 
 
-def corner(width: int, height: int, pixels: bytearray, threshold: int = 128) -> tuple[int, int]:
-    """The pointer's hotspot when it's the shape's pointed top-left corner."""
+def corner(width: int, height: int, pixels: bytearray, threshold: int = 128,
+           which: str = "tl") -> tuple[int, int]:
+    """The pointer's hotspot when it's the shape's pointed corner: top-left
+    ("tl"), top-right ("tr"), bottom-left ("bl") or bottom-right ("br")."""
+    right, bottom = "r" in which, which.startswith("b")
     best: tuple[int, int, int] | None = None
     for y in range(height):
         for x in range(width):
-            if pixels[(y * width + x) * 4 + 3] >= threshold and (best is None or x + y < best[0]):
-                best = (x + y, x, y)
+            if pixels[(y * width + x) * 4 + 3] < threshold:
+                continue
+            score = (width - 1 - x if right else x) + (height - 1 - y if bottom else y)
+            if best is None or score < best[0]:
+                best = (score, x, y)
     return (best[1], best[2]) if best else (0, 0)
 
 

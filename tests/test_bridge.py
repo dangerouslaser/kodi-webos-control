@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import types
 
 import pytest
 
@@ -118,11 +119,11 @@ async def test_wheel_scrolls(mapper, kodi_side):
     assert kodi_side.actions == ["wheelup", "wheelup", "wheeldown"]
 
 
-async def test_magic_remote_back_and_wheel_buttons(mapper, kodi_side):
-    for code in (412, 1198, 1199):
+async def test_magic_remote_back_but_not_its_pointer_signals(mapper, kodi_side):
+    for code in (412, 1198, 1199):  # Back, pointer waking, pointer idle
         mapper.key(code, KEY_DOWN)
         mapper.key(code, KEY_UP)
-    assert kodi_side.actions == ["back", "wheelup", "wheeldown"]
+    assert kodi_side.actions == ["back"]
 
 
 # server -------------------------------------------------------------------
@@ -274,7 +275,8 @@ async def test_pointer_takes_the_remote_over_only_while_kodi_is_on_screen(kodi_s
         reader, _writer = await connect_pointer(rb)
         grab = await read_msg(reader)
         assert grab["grab"] is True and grab["pointer"] is True
-        assert {28, 103, 412, 1198, 272} <= set(grab["consume"])
+        assert {28, 103, 412, 272} <= set(grab["consume"])
+        assert not {1198, 1199} & set(grab["consume"])  # the TV's pointer signals
         assert 115 not in grab["consume"]  # volume stays with the TV
         kodi_side.on_screen = False
         rb.refresh()
@@ -354,31 +356,83 @@ def test_eventserver_mouse_packets():
     assert struct.unpack("!BHH", packets[1][32:]) == (MS_ABSOLUTE, 65535, 32768)
 
 
-async def test_pointer_speed_scales_motion_and_new_strokes_dont_jump(kodi_side, monkeypatch):
-    monkeypatch.setattr(bridge, "STROKE_GAP", 0.05)
+async def test_pointer_follows_the_tv_one_to_one(kodi_side):
     mouse = Mouse()
-    rb = RemoteBridge(dataclasses.replace(POINTER, bridge_pointer_speed=2.0), kodi_side.execute,
-                      lambda: True, None, mouse)
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse)
     await rb.start()
     try:
         reader, writer = await connect_pointer(rb)
         await read_msg(reader)
-
-        async def pos(x, y):
-            count = len(mouse.moves)
+        for x, y in ((900, 500), (1919, 0), (0, 1079)):
             writer.write(json.dumps({"pos": [x, y]}).encode() + b"\n")
-            await writer.drain()
-            await wait_for(lambda: len(mouse.moves) == count + 1)
-            return mouse.moves[-1][:2]
+        await writer.drain()
+        await wait_for(lambda: len(mouse.moves) == 3)
+        assert [m[:2] for m in mouse.moves] == [(900, 500), (1919, 0), (0, 1079)]
+    finally:
+        await rb.close()
 
-        assert await pos(900, 500) == (900, 500)   # first position: where the TV puts it
-        assert await pos(910, 505) == (920, 510)   # motion doubled
-        assert await pos(1900, 505) == (1920, 510)  # clamped to the screen
-        await asyncio.sleep(0.1)                    # pause: a new stroke
-        assert await pos(300, 300) == (1920, 510)   # the TV's jump doesn't move the cursor
-        assert await pos(290, 300) == (1900, 510)
-        rb.update(dataclasses.replace(POINTER, bridge_pointer_speed=1.0))
-        assert await pos(100, 200) == (100, 200)   # 100%: exactly the TV's position
+
+async def read_until(reader, key):
+    while True:
+        msg = await read_msg(reader)
+        if key in msg:
+            return msg
+
+
+async def test_tv_pointer_settings_come_from_the_tv_and_changes_go_back(kodi_side):
+    reported: list[dict[str, str]] = []
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(), None, None,
+                      reported.append)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        tv = {"pointerSpeed": "normal", "pointerSize": "medium", "pointerShape": "auto",
+              "pointerAlignment": "off", "cursorAutoRemover": "on"}
+        writer.write(json.dumps({"tv": tv}).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: reported)
+        assert reported == [tv]
+        # Kodi's settings now mirror the TV: nothing to send.
+        mirrored = dataclasses.replace(POINTER, tv_pointer=tuple(tv.items()))
+        rb.update(mirrored)
+        # The user picks Fast and a large pointer here: sent to the TV.
+        changed = {**tv, "pointerSpeed": "fast", "pointerSize": "large"}
+        rb.update(dataclasses.replace(POINTER, tv_pointer=tuple(changed.items())))
+        msg = await read_until(reader, "set_tv")
+        assert msg == {"set_tv": {"pointerSpeed": "fast", "pointerSize": "large"}}
+    finally:
+        await rb.close()
+
+
+def test_tv_pointer_settings_map_to_addon_values():
+    from resources.lib.settings import tv_pointer_to_addon
+
+    assert tv_pointer_to_addon({"pointerSpeed": "fast", "pointerShape": "c", "pointerAlignment": "on",
+                                "cursorAutoRemover": "off", "pointerSize": "huge", "other": "x"}) == {
+        "tv_pointer_speed": "2", "tv_pointer_shape": "3", "tv_pointer_align": "true",
+        "tv_pointer_autohide": "false"}
+
+
+async def test_pointer_stays_up_with_the_tvs_auto_hide_off(kodi_side):
+    mouse = Mouse()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        writer.write(json.dumps({"pos": [900, 500]}).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: mouse.moves)
+        info = next(iter(rb._clients.values()))
+        rb._keep_pointer(info)
+        assert len(mouse.moves) == 1  # auto-hide on (the default): Kodi hides it
+        info["tv"] = {"cursorAutoRemover": "off"}
+        rb._keep_pointer(info)
+        rb._keep_pointer(info)
+        assert [m[:2] for m in mouse.moves[1:]] == [(901, 500), (900, 500)]
+        info["hidden_at"] = (900, 500)  # a button hid it: stays hidden
+        rb._keep_pointer(info)
+        assert len(mouse.moves) == 3
     finally:
         await rb.close()
 
@@ -480,3 +534,437 @@ def test_eventserver_analog_button_packet():
     code, flags, amount = struct.unpack("!HHH", packet[32:38])
     assert (code, flags, amount) == (0, 0x01 | 0x02 | 0x08 | 0x10 | 0x20, 32768)
     assert packet[38:] == b"XG\0leftanalogtrigger\0"
+
+
+class Focus:
+    def __init__(self, where=None) -> None:
+        self.calls: list[str] = []
+        self.where = where
+
+    def track(self, x=-1, y=-1):
+        self.calls.append("track")
+
+    def restore(self):
+        self.calls.append("restore")
+
+    def key(self):
+        self.calls.append("key")
+
+    def click(self):
+        self.calls.append("click")
+
+    def spot(self):
+        return self.where
+
+
+async def test_resting_pointer_refocuses_once_and_before_buttons(kodi_side, monkeypatch):
+    monkeypatch.setattr(bridge, "POINTER_REST", 0.05)
+    monkeypatch.setattr(bridge, "FOCUS_TRACK", 0.0)
+    focus = Focus()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: kodi_side.on_screen, None, Mouse(),
+                      None, focus)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+
+        async def send(*msgs, wait=0.02):
+            for msg in msgs:
+                writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(wait)
+
+        def restores():
+            return focus.calls.count("restore")
+
+        await send({"pos": [100, 100]}, {"pos": [120, 100]})
+        assert focus.calls == ["track", "track"]   # noted while moving
+        await asyncio.sleep(0.1)
+        assert restores() == 1                     # came to rest: once
+        await asyncio.sleep(0.1)
+        assert restores() == 1
+        await send({"pos": [300, 300]}, {"key": 108, "value": 1}, {"key": 108, "value": 0})
+        assert restores() == 2                     # a button right after moving: first
+        assert kodi_side.actions == ["down"]
+        await asyncio.sleep(0.1)
+        assert restores() == 2                     # not again when the timer would have fired
+    finally:
+        await rb.close()
+
+
+@pytest.mark.parametrize(("item", "builtin"), [("4", "SetFocus(5100,3,absolute)"), ("", "SetFocus(5100)")])
+async def test_focus_goes_back_to_the_last_item_the_pointer_was_over(kodi, item, builtin):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    kodi.info_labels.update({"System.CurrentWindow": "Home", "System.CurrentControlID": "5100",
+                             "Container(5100).CurrentItem": item})
+    keeper.track()
+    keeper.restore()
+    assert kodi.builtins == []  # still focused: nothing to do
+    kodi.info_labels["System.CurrentControlID"] = ""  # pointer over empty space
+    keeper.track()  # remembers the last control, not "nothing"
+    keeper.restore()
+    assert kodi.builtins == [builtin]
+    kodi.info_labels["System.CurrentWindow"] = "Videos"  # another window: leave it alone
+    keeper.restore()
+    assert kodi.builtins == [builtin]
+    keeper.close()
+
+
+async def test_bridge_tells_the_focus_keeper_about_buttons_and_clicks(kodi_side):
+    focus = Focus()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(), None, focus)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"key": 272, "value": 1}, {"key": 272, "value": 0},
+                    {"key": 108, "value": 1}, {"key": 108, "value": 0}, {"wheel": 1}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: focus.calls == ["click", "key", "key"])
+        assert kodi_side.actions == ["select", "down", "wheelup"]
+    finally:
+        await rb.close()
+
+
+@pytest.fixture
+def home(kodi, monkeypatch):
+    """Estuary's home screen, side menu on Movies (item 2) with focus in the widgets."""
+    import xbmcgui
+
+    from resources.lib import service as service_module
+
+    monkeypatch.setattr(service_module, "POINTER_IDLE", 0.05)
+    kodi.conditions["Window.IsActive(home)"] = True
+    kodi.info_labels.update({"Container(9000).ListItem.Property(id)": "movies",
+                             "Container(9000).CurrentItem": "2"})
+
+    def hover(section, item):
+        kodi.info_labels.update({"Container(9000).ListItem.Property(id)": section,
+                                 "Container(9000).CurrentItem": str(item)})
+
+    return types.SimpleNamespace(kodi=kodi, hover=hover,
+                                 view=lambda: xbmcgui.Window(10000).getProperty("WebOS.HomeView"),
+                                 click_flag=lambda: xbmcgui.Window(10000).getProperty("WebOS.PointerClick"))
+
+
+async def test_pointer_freezes_the_home_section_and_buttons_put_the_menu_back(home):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    keeper.track()
+    assert home.view() == "movies"           # frozen on what's showing
+    home.hover("tvshows", 3)                 # hovering moves the menu selection...
+    keeper.track()
+    assert home.view() == "movies"           # ...but the home screen stays on Movies
+    keeper.key()                             # a button: back to button behaviour
+    assert home.kodi.builtins[-1] == "Control.Move(9000,-1)"  # selection back on Movies
+    assert home.view() == ""
+    keeper.close()
+
+
+async def test_pointer_click_on_the_menu_switches_section_without_the_library(home):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    keeper.track()
+    home.hover("music", 4)
+    home.kodi.conditions["Control.HasFocus(9000)"] = True
+    keeper.click()
+    assert home.view() == "music"
+    assert home.click_flag() == "true"       # the skin skips the item's library jump
+    keeper.key()
+    assert home.view() == ""
+    assert not any(b.startswith("Control.Move") for b in home.kodi.builtins)  # already on Music
+    keeper.close()
+
+
+async def test_pointer_idling_puts_the_menu_back(home):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    keeper.track()
+    home.hover("tvshows", 3)
+    await asyncio.sleep(0.1)                 # Kodi hides the pointer after a while
+    assert home.view() == ""
+    assert home.kodi.builtins[-1] == "Control.Move(9000,-1)"
+    keeper.close()
+
+
+async def test_leaving_the_menu_puts_its_highlight_back_on_the_section_shown(home):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    keeper.track()
+    home.hover("tvshows", 3)
+    home.kodi.conditions["Control.HasFocus(9000)"] = True
+    keeper.track()                           # on the menu: hovering, nothing moves
+    assert not any(b.startswith("Control.Move") for b in home.kodi.builtins)
+    home.kodi.conditions["Control.HasFocus(9000)"] = False
+    keeper.track()                           # off the menu (it collapses)
+    assert home.kodi.builtins[-1] == "Control.Move(9000,-1)"
+    assert home.view() == "movies"           # still pointer behaviour
+    keeper.close()
+
+
+async def test_rows_under_the_open_menus_labels_highlight_and_click(home):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    keeper.track()                            # pointer in use: Movies (item 2) frozen
+    home.kodi.conditions["Control.HasFocus(9100)"] = True  # over the label area
+    home.kodi.info_labels.update({"Container(9000).Position": "1", "Container(9000).NumItems": "9"})
+    keeper.track(300, 40 + 95 * 3 + 10)       # the fourth row on screen
+    assert home.kodi.builtins[-1] == "Control.Move(9000,2)"  # item 2 -> item 4
+    home.hover("music", 4)
+    keeper.click()
+    assert home.view() == "music"
+    assert home.click_flag() == "true"
+    keeper.track(300, 1000)                   # below the rows (the buttons): leave it
+    assert home.kodi.builtins[-1] == "Control.Move(9000,2)"
+    keeper.close()
+
+
+async def test_ok_while_pointing_is_a_click(kodi_side):
+    focus = Focus()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(), None, focus)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"pos": [500, 500]}, {"key": 28, "value": 1}, {"key": 28, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: kodi_side.actions == ["select"])
+        assert "click" in focus.calls and "key" not in focus.calls
+        # After a D-pad press hides the pointer, OK is a button again.
+        for msg in ({"key": 108, "value": 1}, {"key": 108, "value": 0},
+                    {"key": 28, "value": 1}, {"key": 28, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: kodi_side.actions == ["select", "down", "select"])
+        assert focus.calls.count("key") == 2 and focus.calls.count("click") == 1
+    finally:
+        await rb.close()
+
+
+@pytest.mark.parametrize(("wheel", "item", "expect"), [
+    ("wheelup", "1", None),        # first item: scrolling up doesn't leave the row
+    ("wheelup", "2", "left"),
+    ("wheeldown", "10", None),     # last item
+    ("wheeldown", "9", "right"),
+])
+def test_wheel_stops_at_the_ends_of_a_row(kodi, wheel, item, expect):
+    from resources.lib.service import WebOsService
+
+    service = WebOsService()
+    kodi.info_labels.update({"System.CurrentControlID": "5100", "Container(5100).NumItems": "10",
+                             "Container(5100).CurrentItem": item,
+                             "Window(Home).Property(WebOS.WheelSideways)": "Control.HasFocus(5100)"})
+    kodi.conditions["Control.HasFocus(5100)"] = True
+    service._remote_button(wheel)
+    sent = [c["params"]["button"] for c in kodi.jsonrpc_calls if c["method"] == "Input.ButtonEvent"]
+    assert sent == ([expect] if expect else [])
+
+
+async def test_wake_distance_is_a_setting(kodi_side):
+    mouse = Mouse()
+    rb = RemoteBridge(dataclasses.replace(POINTER, bridge_pointer_wake=12), kodi_side.execute,
+                      lambda: True, None, mouse)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"pos": [900, 500]}, {"key": 108, "value": 1}, {"key": 108, "value": 0},
+                    {"pos": [905, 503]}, {"pos": [920, 500]}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: len(mouse.moves) == 2)
+        assert mouse.moves[-1][:2] == (920, 500)  # 20 away: past the "very high" 12
+    finally:
+        await rb.close()
+
+
+async def test_tv_pointer_is_lined_up_with_the_focus_while_hidden(kodi_side, monkeypatch):
+    monkeypatch.setattr(bridge, "PREWARP_DELAY", 0.02)
+    mouse = Mouse()
+    focus = Focus(where=(480.0, 270.0))
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse, None, focus)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+
+        async def send(*msgs):
+            for msg in msgs:
+                writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.05)
+
+        await send({"tv": {"cursorAutoRemover": "on"}}, {"pos": [1500, 900]})
+        await send({"key": 105, "value": 1}, {"key": 105, "value": 0})   # Left
+        assert (await read_until(reader, "warp")) == {"warp": [480, 270]}
+        await send({"warped": [480, 270]})       # the TV's pointer is on the item
+        await send({"pos": [490, 275]})          # jitter there: still hidden
+        assert mouse.moves[-1][:2] == (1500, 900)
+        await send({"pos": [700, 400]})          # a real move from the item: no jump
+        assert [m[:2] for m in mouse.moves[-1:]] == [(700, 400)]
+    finally:
+        await rb.close()
+
+
+async def test_pointer_waits_for_the_tv_when_it_wakes_before_lining_up(kodi_side, monkeypatch):
+    monkeypatch.setattr(bridge, "FOCUS_TRACK", 0.0)
+    mouse = Mouse()
+    focus = Focus(where=(480.0, 270.0))
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse, None, focus)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+
+        async def send(*msgs):
+            for msg in msgs:
+                writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.05)
+
+        await send({"tv": {"cursorAutoRemover": "on"}}, {"pos": [1500, 900]})
+        await send({"key": 105, "value": 1}, {"key": 105, "value": 0})
+        await send({"pos": [1900, 1000]})        # wakes before the TV lined up (asleep)
+        assert (await read_until(reader, "warp")) == {"warp": [480, 270]}
+        assert mouse.moves[-1][:2] == (1500, 900)  # not shown early, nor at the target
+        await send({"pos": [1910, 1005]})        # from before the TV moved its pointer
+        assert mouse.moves[-1][:2] == (1500, 900)
+        await send({"pos": [490, 275]})          # the TV's pointer arrived: shown there
+        assert mouse.moves[-1][:2] == (490, 275)
+        # Turned off: it comes back where the remote points.
+        rb.update(dataclasses.replace(POINTER, bridge_pointer_return=False))
+        await send({"key": 105, "value": 1}, {"key": 105, "value": 0}, {"pos": [1300, 100]})
+        assert mouse.moves[-1][:2] == (1300, 100)
+    finally:
+        await rb.close()
+
+
+async def test_no_return_to_focus_with_a_bridge_that_cant_move_the_tv_pointer(kodi_side):
+    mouse = Mouse()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse, None,
+                      Focus(where=(480.0, 270.0)))
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)  # no "tv" message: bridge 0.2
+        await read_msg(reader)
+        for msg in ({"pos": [1500, 900]}, {"key": 105, "value": 1}, {"key": 105, "value": 0},
+                    {"pos": [1900, 1000]}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: len(mouse.moves) == 2)
+        assert mouse.moves[-1][:2] == (1900, 1000)
+    finally:
+        await rb.close()
+
+
+async def test_focus_keeper_learns_where_items_are(kodi):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    kodi.info_labels.update({"System.CurrentWindow": "Home", "System.CurrentControlID": "5100",
+                             "Container(5100).Position": "0", "Container(5100).NumItems": "9"})
+    keeper.track(100, 300)
+    kodi.info_labels["Container(5100).Position"] = "1"
+    keeper.track(400, 300)
+    kodi.info_labels["Container(5100).Position"] = "4"  # the D-pad went on
+    assert keeper.spot() == (1300, 300)
+    kodi.info_labels["System.CurrentControlID"] = "802"  # never pointed at
+    assert keeper.spot() is None
+    keeper.close()
+
+
+async def test_settings_side_menu_switches_on_click_not_hover(kodi):
+    import xbmcgui
+
+
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    kodi.info_labels.update({"System.CurrentWindow": "Settings", "System.CurrentControlID": "9101",
+                             "Container(3).NumItems": "6"})
+    kodi.conditions["Control.HasFocus(9101)"] = True
+    home = xbmcgui.Window(10000)
+    keeper.track(200, 130 + 2 * 85 + 40)       # over the third category
+    assert home.getProperty("WebOS.Pointing") == "true"
+    assert home.getProperty("WebOS.PadRow") == "2"
+    assert kodi.builtins == []                 # hovering switches nothing
+    keeper.track(200, 130 + 7 * 85)            # below the last one
+    assert home.getProperty("WebOS.PadRow") == ""
+    keeper.track(200, 130 + 4 * 85 + 10)
+    keeper.click()
+    assert kodi.builtins == ["SetFocus(-196)"]  # Kodi's fifth category button
+    kodi.conditions["Window.IsActive(1120)"] = True
+    keeper.click()
+    assert kodi.builtins[-1] == "SetFocus(25)"   # the LG TV page's own buttons
+    keeper.key()                               # buttons: back to the list
+    assert kodi.builtins[-1] == "SetFocus(3)"
+    assert home.getProperty("WebOS.Pointing") == ""
+    keeper.close()
+
+
+async def test_home_goes_to_kodis_home_and_held_to_the_tvs(kodi_side, monkeypatch):
+    monkeypatch.setattr(bridge, "LONG_PRESS", 0.05)
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse())
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        assert (await read_msg(reader))["grab"] is True
+
+        async def send(*msgs, wait=0.02):
+            for msg in msgs:
+                writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(wait)
+
+        await send({"key": 172, "value": 1}, {"key": 172, "value": 0})
+        assert kodi_side.actions == ["kodihome"]
+        await send({"key": 172, "value": 1}, wait=0.1)
+        await send({"key": 172, "value": 0})
+        assert kodi_side.actions == ["kodihome"]
+        assert await read_until(reader, "press") == {"press": 172}
+    finally:
+        await rb.close()
+
+
+async def test_home_stays_with_the_tv_when_the_remote_isnt_taken_over(kodi_side):
+    rb = RemoteBridge(BASE, kodi_side.execute, lambda: True, None, Mouse())
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        assert (await read_msg(reader))["grab"] is False
+        for msg in ({"key": 102, "value": 1}, {"key": 102, "value": 0}, {"key": BACK, "value": 1}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: kodi_side.actions == ["back"])
+    finally:
+        await rb.close()
+
+
+@pytest.mark.parametrize(("speed", "notches", "expect"), [
+    (1.0, 3, 3),      # normal: an item per notch
+    (0.5, 3, 1),      # medium: two notches per item (the third waits for a fourth)
+    (1 / 3, 3, 1),
+    (2.0, 2, 4),
+])
+async def test_wheel_speed(kodi_side, speed, notches, expect):
+    mapper = KeyMapper(kodi_side.execute, lambda: True, lambda: speed)
+    for _ in range(notches):
+        mapper.wheel(-1)
+    assert kodi_side.actions == ["wheeldown"] * expect
+
+
+async def test_slow_wheel_starts_over_on_a_change_of_direction(kodi_side):
+    mapper = KeyMapper(kodi_side.execute, lambda: True, lambda: 0.5)
+    mapper.wheel(-1)
+    mapper.wheel(1)       # half a step down is dropped, not taken off this
+    mapper.wheel(1)
+    assert kodi_side.actions == ["wheelup"]

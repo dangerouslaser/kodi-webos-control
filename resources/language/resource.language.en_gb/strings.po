@@ -676,33 +676,145 @@ msgid "While Kodi is on screen, the Magic Remote's pointer moves Kodi's mouse an
 msgstr ""
 
 msgctxt "#32606"
-msgid "Pointer speed"
+msgid "Pointer wake sensitivity"
 msgstr ""
 
 msgctxt "#32656"
-msgid "How far Kodi's cursor moves for a movement of the remote. 100% follows the TV's own pointer exactly."
+msgid "After you press a button the pointer hides. This sets how far you move the remote to bring it back: Low needs a deliberate move, Very high wakes it at the slightest motion."
+msgstr ""
+
+msgctxt "#32607"
+msgid "Pointer comes back on the focused item"
+msgstr ""
+
+msgctxt "#32657"
+msgid "When the pointer comes back after you've moved with the arrow buttons, it appears on the item they selected rather than where the remote points. It learns where things are from where you point, so it gets better with use."
+msgstr ""
+
+msgctxt "#32608"
+msgid "TV pointer"
+msgstr ""
+
+msgctxt "#32630"
+msgid "Tracking speed"
+msgstr ""
+
+msgctxt "#32631"
+msgid "Pointer size"
+msgstr ""
+
+msgctxt "#32632"
+msgid "Pointer shape"
+msgstr ""
+
+msgctxt "#32633"
+msgid "Pointer alignment"
+msgstr ""
+
+msgctxt "#32634"
+msgid "Hide pointer automatically"
+msgstr ""
+
+msgctxt "#32680"
+msgid "The TV's own pointer speed (Settings > General > Devices > Pointer settings). Kodi's pointer follows the TV's exactly."
+msgstr ""
+
+msgctxt "#32681"
+msgid "The TV's pointer size; Kodi's pointer uses the TV's own images at that size."
+msgstr ""
+
+msgctxt "#32682"
+msgid "The TV's pointer shape; Kodi's pointer matches it."
+msgstr ""
+
+msgctxt "#32683"
+msgid "Re-centres the pointer when you point the remote at the middle of the screen (the TV's own setting)."
+msgstr ""
+
+msgctxt "#32684"
+msgid "Hide the pointer after a few seconds without movement, in Kodi as on the TV. Off keeps it up until you press a button."
+msgstr ""
+
+msgctxt "#32660"
+msgid "Slow"
+msgstr ""
+
+msgctxt "#32661"
+msgid "Normal"
+msgstr ""
+
+msgctxt "#32662"
+msgid "Fast"
+msgstr ""
+
+msgctxt "#32663"
+msgid "Small"
+msgstr ""
+
+msgctxt "#32664"
+msgid "Medium"
+msgstr ""
+
+msgctxt "#32665"
+msgid "Large"
+msgstr ""
+
+msgctxt "#32666"
+msgid "Auto"
+msgstr ""
+
+msgctxt "#32667"
+msgid "Points up-left"
+msgstr ""
+
+msgctxt "#32668"
+msgid "Points up-right"
+msgstr ""
+
+msgctxt "#32669"
+msgid "Points down-left"
+msgstr ""
+
+msgctxt "#32670"
+msgid "Points down-right"
+msgstr ""
+
+msgctxt "#32609"
+msgid "Scroll wheel speed"
+msgstr ""
+
+msgctxt "#32659"
+msgid "How far the Magic Remote's scroll wheel moves lists: Normal is one item per notch; Slow and Medium need several notches per item, Fast moves two."
+msgstr ""
+
+msgctxt "#32690"
+msgid "Slow"
+msgstr ""
+
+msgctxt "#32691"
+msgid "Medium"
+msgstr ""
+
+msgctxt "#32692"
+msgid "Normal"
+msgstr ""
+
+msgctxt "#32693"
+msgid "Fast"
 msgstr ""
 
 msgctxt "#32640"
-msgid "50%"
+msgid "Low"
 msgstr ""
 
 msgctxt "#32641"
-msgid "75%"
+msgid "Medium"
 msgstr ""
 
 msgctxt "#32642"
-msgid "100%"
+msgid "High"
 msgstr ""
 
 msgctxt "#32643"
-msgid "125%"
-msgstr ""
-
-msgctxt "#32644"
-msgid "150%"
-msgstr ""
-
-msgctxt "#32645"
-msgid "200%"
+msgid "Very high"
 msgstr ""

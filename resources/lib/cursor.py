@@ -3,23 +3,31 @@
 The Remote Bridge app reads the webOS cursor images from the TV's firmware
 and sends them over, so Kodi's cursor matches that TV without anyone shipping
 LG's artwork. Pointer.xml has fixed geometry, so every image is copied onto a
-CANVAS-sized transparent canvas with its hotspot (the fingertip, the drop's
-tip) at HOTSPOT. The skin's bundled pointers use the same layout.
+CANVAS-sized transparent canvas with its hotspot (the pointed corner, the
+fingertip) at HOTSPOT, its middle: the pointer may point any way, and come
+in three sizes. The skin's bundled pointers use the same layout.
 Pointer.xml reads them from special://profile/addon_data/service.webostv/pointer/.
 """
 
 from __future__ import annotations
 
+import functools
 import os
 
 from . import pngutil
 
-CANVAS = (128, 128)
-HOTSPOT = (40, 12)
+CANVAS = (256, 256)
+HOTSPOT = (128, 128)
 KINDS = ("point", "hover", "hold", "drag")
 
 
-HOTSPOT_RULES = {"tip": pngutil.tip, "corner": pngutil.corner}
+HOTSPOT_RULES = {
+    "tip": pngutil.tip,
+    "corner": pngutil.corner,
+    "corner-tr": functools.partial(pngutil.corner, which="tr"),
+    "corner-bl": functools.partial(pngutil.corner, which="bl"),
+    "corner-br": functools.partial(pngutil.corner, which="br"),
+}
 
 
 def install(images: dict[str, bytes], directory: str,
@@ -31,7 +39,8 @@ def install(images: dict[str, bytes], directory: str,
     a skin reload. Images that can't be read are skipped (the skin falls back
     to its own pointer for those). `hotspot` says where each image's click
     point is: "tip" (topmost point: the classic hand) or "corner" (the
-    current webOS pointer's pointed top-left corner).
+    current webOS pointer's pointed top-left corner; "corner-tr", "corner-bl"
+    and "corner-br" when it's set to point another way).
     """
     find = HOTSPOT_RULES.get(hotspot, pngutil.tip)
     os.makedirs(directory, exist_ok=True)

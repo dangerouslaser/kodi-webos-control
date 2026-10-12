@@ -51,6 +51,10 @@ def getInfoLabel(label: str) -> str:  # noqa: N802
     return info_labels.get(label, "")
 
 
+def getSkinDir() -> str:  # noqa: N802
+    return "skin.estuary"
+
+
 def getCondVisibility(condition: str) -> bool:  # noqa: N802
     return conditions.get(condition, False)
 

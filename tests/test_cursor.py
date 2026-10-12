@@ -106,3 +106,17 @@ def test_install_lays_pointers_out_for_the_skin(tmp_path):
     assert pngutil.tip(w, h, px) == cursor.HOTSPOT  # fingertip on the skin's hotspot
     # The same images again: nothing changes, so no skin reload.
     assert cursor.install({"point": png, "hover": png}, str(tmp_path))[1] is False
+
+
+@pytest.mark.parametrize(("hotspot", "flip_x", "flip_y"), [
+    ("corner-tr", True, False), ("corner-bl", False, True), ("corner-br", True, True)])
+def test_pointers_that_point_other_ways(tmp_path, hotspot, flip_x, flip_y):
+    def shape(x, y):
+        return pointed_circle(29 - x if flip_x else x, 29 - y if flip_y else y)
+
+    expect = (29 - 4 if flip_x else 4, 29 - 4 if flip_y else 4)
+    assert pngutil.corner(30, 30, image(30, 30, shape), which=hotspot[-2:]) == expect
+    paths, _ = cursor.install({"point": encode(30, 30, image(30, 30, shape), [0])}, str(tmp_path),
+                              hotspot=hotspot)
+    w, h, px = pngutil.read_rgba(open(paths["point"], "rb").read())
+    assert pngutil.corner(w, h, px, which=hotspot[-2:]) == cursor.HOTSPOT
