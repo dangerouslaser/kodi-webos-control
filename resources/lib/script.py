@@ -28,6 +28,10 @@ def main(argv: list[str]) -> None:
             ui.change_setting(args[1] if len(args) > 1 else "")
         elif name == "choose_kodi_input":
             ui.choose_kodi_input(stay="stay" in args[1:])
+        elif name == "bridge_setup":
+            ui.bridge_setup()
+        elif name == "bridge_remove":
+            ui.bridge_remove()
         elif name == "choose_preset":
             ui.choose_rule_preset(args[1] if len(args) > 1 else "", stay="stay" in args[2:])
         else:

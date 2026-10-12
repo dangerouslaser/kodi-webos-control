@@ -50,6 +50,10 @@ class Settings:
     on_switch_away: str = "none"
     resume_on_return: bool = True
     transparent_control: bool = False
+    # Remote Bridge: the TV remote drives Kodi (rooted TVs)
+    remote_bridge: bool = False
+    bridge_port: int = 9779
+    bridge_token: str = ""
     # Motion smoothing by frame rate (blind writes: TVs won't report it)
     motion_film: str = ""
     motion_video: str = ""
@@ -95,6 +99,9 @@ class Settings:
             on_switch_away=_option(addon, "on_switch_away", SWITCH_AWAY_ACTIONS),
             resume_on_return=addon.getSettingBool("resume_on_return"),
             transparent_control=addon.getSettingBool("transparent_control"),
+            remote_bridge=addon.getSettingBool("remote_bridge"),
+            bridge_port=int(number("bridge_port", 9779)),
+            bridge_token=addon.getSetting("bridge_token").strip(),
             motion_film=_option(addon, "motion_film", MOTION_MODES),
             motion_video=_option(addon, "motion_video", MOTION_MODES),
             motion_restore=_option(addon, "motion_restore", MOTION_MODES),

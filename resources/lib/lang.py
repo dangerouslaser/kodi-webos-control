@@ -33,6 +33,16 @@ VOLUME = 32310
 MOTION = 32430
 LG_TV = 32431
 SCREEN_OFF = 32432
+BRIDGE_SETUP = 32602
+BRIDGE_NO_HBCHANNEL = 32610
+BRIDGE_INSTALL_PROMPT = 32611
+BRIDGE_WAITING = 32612
+BRIDGE_INSTALL_TIMEOUT = 32613
+BRIDGE_SETTING_UP = 32614
+BRIDGE_CONNECTED = 32615
+BRIDGE_NOT_CONNECTED = 32616
+BRIDGE_REMOVED = 32617
+TV_NOT_CONNECTED = 32618
 MOTION_LABELS = {"off": 32411, "cinemaClear": 32412, "natural": 32413, "smooth": 32414}
 
 _FALLBACK = {
@@ -63,6 +73,23 @@ _FALLBACK = {
     MOTION: "Motion smoothing",
     LG_TV: "LG TV",
     SCREEN_OFF: "Screen off",
+    BRIDGE_SETUP: "Set up Remote Bridge on the TV",
+    BRIDGE_NO_HBCHANNEL: "Remote Bridge needs a rooted TV with Homebrew Channel installed. "
+                         "Homebrew Channel wasn't found on this TV.",
+    BRIDGE_INSTALL_PROMPT: "The Remote Bridge app isn't on the TV yet. Kodi will open Homebrew Channel "
+                           "on the TV with the Remote Bridge repository filled in. On the TV: confirm "
+                           "adding the repository, then open Remote Bridge for Kodi in the app list "
+                           "and install it. Kodi finishes the setup by itself and brings you back here.",
+    BRIDGE_WAITING: "Waiting for Remote Bridge to be installed on the TV...",
+    BRIDGE_INSTALL_TIMEOUT: "Remote Bridge wasn't installed within 10 minutes. "
+                            "Run Set up again once it's installed.",
+    BRIDGE_SETTING_UP: "Setting up Remote Bridge on the TV...",
+    BRIDGE_CONNECTED: "Remote Bridge connected: the TV remote now controls Kodi.",
+    BRIDGE_NOT_CONNECTED: "The Remote Bridge app was set up, but it hasn't connected to Kodi. Check that "
+                          "the TV can reach this Kodi on TCP port %s (firewall, Docker port mapping), "
+                          "then run Set up again.",
+    BRIDGE_REMOVED: "Remote Bridge removed from the TV.",
+    TV_NOT_CONNECTED: "The TV isn't connected.",
     32500: "OLED pixel brightness",
     32501: "HDR dynamic tone mapping",
     32502: "Noise reduction",

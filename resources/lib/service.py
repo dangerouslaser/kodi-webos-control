@@ -7,6 +7,7 @@ the loop with run_coroutine_threadsafe; the loop thread owns TvController.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 import threading
@@ -82,6 +83,14 @@ def _video_height() -> int:
         return 0
 
 
+def _press_button(name: str) -> None:
+    """A button of Kodi's remote keymap, so it means what it does in the current window."""
+    xbmc.executeJSONRPC(json.dumps({
+        "jsonrpc": "2.0", "id": 1, "method": "Input.ButtonEvent",
+        "params": {"button": name, "keymap": "R1"},
+    }))
+
+
 def _log_task_error(task: Any) -> None:
     if not task.cancelled() and task.exception() is not None:
         log.warning(f"background task failed: {task.exception()!r}")
@@ -140,6 +149,7 @@ class WebOsService:
         self.rules: Any = None
         self.sound: Any = None
         self.watcher: Any = None
+        self.bridge: Any = None
         self._inputs: tuple = ()
         self._launcher_key: tuple = ()
         self._lock_fd: int | None = None
@@ -174,6 +184,7 @@ class WebOsService:
 
         # Lazy imports: only pay for aiowebostv/websockets once we know we run.
         from .automations import PlaybackRules  # noqa: PLC0415
+        from .bridge import RemoteBridge  # noqa: PLC0415
         from .remote import Overlay  # noqa: PLC0415
         from .soundrules import SoundRules  # noqa: PLC0415
         from .state import PropertyPublisher  # noqa: PLC0415
@@ -200,6 +211,9 @@ class WebOsService:
             self.rules = PlaybackRules(self.controller, self.settings)
             self.sound = SoundRules(self.controller, self.settings)
             self.watcher = TvWatcher(self.controller, self.settings, _KodiSide(self))
+            self.bridge = RemoteBridge(self.settings, _press_button, self._kodi_on_screen,
+                                       self._bridge_changed)
+            await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
         self.publish_setting_labels()
@@ -255,7 +269,7 @@ class WebOsService:
             self.publisher.close()
         if self.loop is None:
             return
-        for part in (self.watcher, self.rules, self.sound):
+        for part in (self.bridge, self.watcher, self.rules, self.sound):
             if part is None:
                 continue
             try:
@@ -344,7 +358,7 @@ class WebOsService:
         self.settings = settings
         self.publish_setting_labels()
         if self.loop is not None:
-            for part in (self.rules, self.sound, self.watcher):
+            for part in (self.rules, self.sound, self.watcher, self.bridge):
                 if part is not None:
                     self.loop.call_soon_threadsafe(part.update, settings)
             # Someone is changing settings in Kodi's UI, so the TV is
@@ -370,6 +384,24 @@ class WebOsService:
         call(getattr(self.rules, event))
         if self.sound is not None:
             call(self.sound.stopped)
+
+    def _bridge_changed(self, state: str) -> None:
+        """Loop thread: WebOS.RemoteBridge for skins (connected, waiting, or empty)."""
+        if self.closing:
+            return
+        window = xbmcgui.Window(10000)
+        if state:
+            window.setProperty("WebOS.RemoteBridge", state)
+        else:
+            window.clearProperty("WebOS.RemoteBridge")
+
+    def _kodi_on_screen(self) -> bool:
+        """Loop thread: True only when the TV is known to be showing Kodi."""
+        from .watcher import kodi_foreground  # noqa: PLC0415
+
+        if self.controller is None:
+            return False
+        return kodi_foreground(self.settings, self.controller.state) is True
 
     def forward(self, name: str, args: list[Any]) -> None:
         """Run an action for transparent control; no reply, errors logged."""
@@ -405,6 +437,8 @@ class WebOsService:
             result = await actions.dispatch(self.controller, name, args, rules=self.rules)
             if name == "status" and self.watcher is not None:
                 result = {**result, **self.watcher.status()}
+            if name == "status" and self.bridge is not None:
+                result = {**result, **self.bridge.status()}
             reply = ipc.reply_ok(request_id, result)
         except ActionError as err:
             level = log.info if isinstance(err, BadRequest) else log.warning

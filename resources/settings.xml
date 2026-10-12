@@ -262,6 +262,46 @@
           <control type="toggle"/>
         </setting>
       </group>
+      <group id="2" label="32600">
+        <setting id="remote_bridge" type="boolean" label="32601" help="32651">
+          <level>0</level>
+          <default>false</default>
+          <control type="toggle"/>
+        </setting>
+        <setting id="bridge_setup" type="action" label="32602" help="32652">
+          <level>0</level>
+          <data>RunScript(service.webostv,bridge_setup)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+        <setting id="bridge_remove" type="action" label="32603" help="32653">
+          <level>0</level>
+          <data>RunScript(service.webostv,bridge_remove)</data>
+          <control type="button" format="action">
+            <close>true</close>
+          </control>
+        </setting>
+        <setting id="bridge_port" type="integer" label="32604" help="32654">
+          <level>2</level>
+          <default>9779</default>
+          <constraints>
+            <minimum>1024</minimum>
+            <maximum>65535</maximum>
+          </constraints>
+          <control type="edit" format="integer">
+            <heading>32604</heading>
+          </control>
+        </setting>
+        <setting id="bridge_token" type="string" label="32604">
+          <level>4</level>
+          <default/>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <control type="edit" format="string"/>
+        </setting>
+      </group>
     </category>
     <category id="motion_sound" label="32400" help="">
       <group id="1" label="32407">

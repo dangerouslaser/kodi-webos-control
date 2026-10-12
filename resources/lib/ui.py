@@ -312,7 +312,7 @@ def choose_volume() -> None:
 
 # Settings a skin page may change: bools toggle, options open a picker.
 EDITABLE_BOOLS = {
-    "rules_enabled", "restore_on_stop", "resume_on_return", "transparent_control",
+    "rules_enabled", "restore_on_stop", "resume_on_return", "transparent_control", "remote_bridge",
     "toast_on_connect", "auto_discover", "loopback_fallback", "debug",
 }
 EDITABLE_OPTIONS = {
@@ -399,8 +399,144 @@ def show_status(info: dict[str, Any]) -> None:
         "Transparent control: "
         + ("active" if info.get("transparent_active")
            else "on, waiting" if info.get("transparent_control") else "off"),
+        "Remote Bridge: "
+        + (f"connected ({info.get('remote_bridge_version') or '?'})"
+           if info.get("remote_bridge_connected")
+           else "waiting for the TV" if info.get("remote_bridge_listening")
+           else "on, not listening (port in use?)" if info.get("remote_bridge") else "off"),
     ]
     _dialog().textviewer(lang.get(lang.STATUS), "\n".join(lines))
+
+
+# Remote Bridge --------------------------------------------------------------
+
+BRIDGE_INSTALL_WAIT = 600.0
+BRIDGE_CONNECT_WAIT = 30.0
+POLL_INTERVAL = 3.0
+
+
+def _kodi_app(catalog: dict[str, Any], info: dict[str, Any]) -> str:
+    """webOS app id of Kodi's input; the current app when it isn't known yet."""
+    wanted = str(info.get("kodi_input") or "").casefold()
+    if wanted:
+        for i in catalog.get("inputs", []):
+            if wanted in (i["id"].casefold(), i["label"].casefold(), i["app_id"].casefold()):
+                return i["app_id"]
+    return str(info.get("app") or "")
+
+
+def _local_ip(tv_host: str) -> str:
+    """This box's address on the TV's network (no packet is sent)."""
+    import socket  # noqa: PLC0415
+
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+        sock.connect((tv_host, 3000))
+        return sock.getsockname()[0]
+
+
+def _wait(seconds: float, heading: int, done: Any) -> bool:
+    """Poll done() under a background progress bar; False on timeout/abort."""
+    monitor = xbmc.Monitor()
+    progress = xbmcgui.DialogProgressBG()
+    progress.create(ADDON_NAME, lang.get(heading))
+    try:
+        waited = 0.0
+        while waited < seconds:
+            if done():
+                return True
+            if monitor.waitForAbort(POLL_INTERVAL):
+                return False
+            waited += POLL_INTERVAL
+            progress.update(int(100 * waited / seconds))
+        return bool(done())
+    finally:
+        progress.close()
+
+
+def _bridge_context() -> tuple[dict[str, Any], dict[str, Any], set[str]] | None:
+    status_reply = _call("status")
+    if not status_reply:
+        return None
+    info = status_reply["result"]
+    if not info.get("connected"):
+        _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.TV_NOT_CONNECTED))
+        return None
+    catalog_reply = _call("catalog")
+    if not catalog_reply:
+        return None
+    catalog = catalog_reply["result"]
+    return info, catalog, {a["id"] for a in catalog.get("apps", [])}
+
+
+def _installed_apps() -> set[str]:
+    reply = ipc.call("catalog")
+    if not reply.get("ok"):
+        return set()
+    return {a["id"] for a in reply["result"].get("apps", [])}
+
+
+def bridge_setup() -> None:
+    """Install (through Homebrew Channel) and connect the Remote Bridge app."""
+    import secrets  # noqa: PLC0415
+
+    from .bridge import APP_ID, HBCHANNEL_ID, REPO_URL  # noqa: PLC0415
+
+    context = _bridge_context()
+    if context is None:
+        return
+    info, catalog, apps = context
+    # Remember Kodi's input now, while the TV is showing it.
+    return_to = _kodi_app(catalog, info)
+    if HBCHANNEL_ID not in apps:
+        _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_NO_HBCHANNEL))
+        return
+    if APP_ID not in apps:
+        if not _dialog().yesno(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_INSTALL_PROMPT)):
+            return
+        if not _call("app", [HBCHANNEL_ID, {"launchMode": "addRepository", "url": REPO_URL}]):
+            return
+        if not _wait(BRIDGE_INSTALL_WAIT, lang.BRIDGE_WAITING, lambda: APP_ID in _installed_apps()):
+            _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_INSTALL_TIMEOUT))
+            return
+
+    addon = xbmcaddon.Addon("service.webostv")
+    token = addon.getSetting("bridge_token").strip()
+    if not token:
+        token = secrets.token_urlsafe(18)
+        addon.setSetting("bridge_token", token)
+    try:
+        port = int(addon.getSetting("bridge_port") or 9779)
+    except ValueError:
+        port = 9779
+    addon.setSettingBool("remote_bridge", True)
+    params = {"kodiHost": _local_ip(str(info.get("host"))), "kodiPort": port, "token": token,
+              "returnTo": return_to}
+    if not _call("app", [APP_ID, params]):
+        return
+
+    def connected() -> bool:
+        reply = ipc.call("status")
+        return bool(reply.get("ok") and reply["result"].get("remote_bridge_connected"))
+
+    if _wait(BRIDGE_CONNECT_WAIT, lang.BRIDGE_SETTING_UP, connected):
+        _dialog().notification(ADDON_NAME, lang.get(lang.BRIDGE_CONNECTED))
+    else:
+        _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_NOT_CONNECTED) % port)
+
+
+def bridge_remove() -> None:
+    from .bridge import APP_ID  # noqa: PLC0415
+
+    context = _bridge_context()
+    if context is None:
+        return
+    info, catalog, apps = context
+    if APP_ID in apps and not _call(
+        "app", [APP_ID, {"action": "remove", "returnTo": _kodi_app(catalog, info)}]
+    ):
+        return
+    xbmcaddon.Addon("service.webostv").setSettingBool("remote_bridge", False)
+    _dialog().notification(ADDON_NAME, lang.get(lang.BRIDGE_REMOVED))
 
 
 def repair() -> None:

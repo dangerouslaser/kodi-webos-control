@@ -182,6 +182,26 @@ accepts all of these but reports none, so it shows the last value sent from Kodi
   playback keys, channel up/down, volume and mute. Kodi's context-menu key switches the TV back to
   Kodi (and closes the dialog). Off-TV only: Kodi on the TV gets no key presses in the background.
 
+### Remote Bridge (rooted TVs)
+
+The TV's own remote controls Kodi over the network, in place of HDMI-CEC (which Intel boxes and VMs
+usually don't have). Needs a rooted TV with [Homebrew Channel](https://github.com/webosbrew/webos-homebrew-channel).
+
+- **Set up Remote Bridge on the TV** (also on the skin's LG TV page): if the
+  [Remote Bridge app](https://github.com/dangerouslaser/kodi-remote-bridge) isn't on the TV, Kodi opens
+  Homebrew Channel with its repository filled in; you confirm and install it on the TV. Kodi then
+  launches the app with this box's address and a token, and the app starts a small root daemon
+  (its own systemd unit, re-created at boot by a Homebrew Channel startup hook) and switches the TV
+  back to Kodi. No SSH.
+- The daemon reads the remote's input devices (read-only, so the TV still handles every button) and
+  streams presses to Kodi on TCP port 9779. Kodi acts on them only while its input is on screen.
+- Presses become buttons of Kodi's remote keymap (`Input.ButtonEvent`, `R1`), so they mean what a
+  remote's buttons mean in each window (OK selects in menus and opens the OSD in fullscreen video)
+  and custom keymaps apply. Holding OK sends `menu` (context menu). Arrows repeat only while the TV
+  sends repeats. Buttons with no mapping are logged once with their code.
+- **Remove** stops the daemon and removes its startup hook; uninstall the app in Homebrew Channel
+  to remove it completely.
+
 
 ### Video context menu
 
@@ -222,6 +242,7 @@ Published on `Window(Home)`; only changed values are written.
 | `WebOS.TransparentControl` | `true` while transparent control is catching keys |
 | `WebOS.KodiInput` | `Streaming Box (HDMI_1)` (Kodi's TV input setting, with the TV's name) |
 | `WebOS.ConfiguredHost` | `192.168.1.224` (host setting) |
+| `WebOS.RemoteBridge` | `connected`, `waiting` (listening for the TV), or empty (off) |
 | `WebOS.Rule.SDR` / `.HDR10` / `.HLG` / `.DolbyVision` | `Cinema (HDR)` (HDR rule presets, friendly names) |
 
 Example: `$INFO[Window(Home).Property(WebOS.Volume)]`.

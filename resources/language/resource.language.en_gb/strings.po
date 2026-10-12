@@ -582,3 +582,87 @@ msgstr ""
 msgctxt "#32573"
 msgid "The same cleanup for 720p, 1080p and 4K video. Off suits good sources such as Blu-ray rips."
 msgstr ""
+
+msgctxt "#32600"
+msgid "Remote Bridge (rooted TVs)"
+msgstr ""
+
+msgctxt "#32601"
+msgid "Use the TV remote in Kodi"
+msgstr ""
+
+msgctxt "#32602"
+msgid "Set up Remote Bridge on the TV"
+msgstr ""
+
+msgctxt "#32603"
+msgid "Remove Remote Bridge from the TV"
+msgstr ""
+
+msgctxt "#32604"
+msgid "Remote Bridge port"
+msgstr ""
+
+msgctxt "#32651"
+msgid "While Kodi is on screen, the LG remote's buttons control Kodi over the network, in place of HDMI-CEC. Needs a rooted TV with Homebrew Channel and the Remote Bridge app: use Set up."
+msgstr ""
+
+msgctxt "#32652"
+msgid "Installs the Remote Bridge app on the TV through Homebrew Channel (you confirm it on the TV), then connects it to this Kodi."
+msgstr ""
+
+msgctxt "#32653"
+msgid "Stops the Remote Bridge on the TV and removes its startup hook. Uninstall the app in Homebrew Channel to remove it completely."
+msgstr ""
+
+msgctxt "#32654"
+msgid "TCP port Kodi listens on for the TV. Change it only if something else uses 9779."
+msgstr ""
+
+msgctxt "#32610"
+msgid "Remote Bridge needs a rooted TV with Homebrew Channel installed. Homebrew Channel wasn't found on this TV."
+msgstr ""
+
+msgctxt "#32611"
+msgid "The Remote Bridge app isn't on the TV yet. Kodi will open Homebrew Channel on the TV with the Remote Bridge repository filled in. On the TV: confirm adding the repository, then open Remote Bridge for Kodi in the app list and install it. Kodi finishes the setup by itself and brings you back here."
+msgstr ""
+
+msgctxt "#32612"
+msgid "Waiting for Remote Bridge to be installed on the TV..."
+msgstr ""
+
+msgctxt "#32613"
+msgid "Remote Bridge wasn't installed within 10 minutes. Run Set up again once it's installed."
+msgstr ""
+
+msgctxt "#32614"
+msgid "Setting up Remote Bridge on the TV..."
+msgstr ""
+
+msgctxt "#32615"
+msgid "Remote Bridge connected: the TV remote now controls Kodi."
+msgstr ""
+
+msgctxt "#32616"
+msgid "The Remote Bridge app was set up, but it hasn't connected to Kodi. Check that the TV can reach this Kodi on TCP port %s (firewall, Docker port mapping), then run Set up again."
+msgstr ""
+
+msgctxt "#32617"
+msgid "Remote Bridge removed from the TV."
+msgstr ""
+
+msgctxt "#32618"
+msgid "The TV isn't connected."
+msgstr ""
+
+msgctxt "#32620"
+msgid "Connected"
+msgstr ""
+
+msgctxt "#32621"
+msgid "Waiting for the TV"
+msgstr ""
+
+msgctxt "#32622"
+msgid "Not set up"
+msgstr ""
