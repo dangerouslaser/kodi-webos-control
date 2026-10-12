@@ -408,7 +408,9 @@ def show_status(info: dict[str, Any]) -> None:
         + ("active" if info.get("transparent_active")
            else "on, waiting" if info.get("transparent_control") else "off"),
         "Remote Bridge: "
-        + (f"connected ({info.get('remote_bridge_version') or '?'})"
+        + (f"connected ({info.get('remote_bridge_version') or '?'}"
+           + (f", update to {info.get('remote_bridge_bundled')} available)"
+              if info.get("remote_bridge_outdated") else ")")
            if info.get("remote_bridge_connected")
            else "waiting for the TV" if info.get("remote_bridge_listening")
            else "on, not listening (port in use?)" if info.get("remote_bridge") else "off"),
@@ -487,7 +489,7 @@ def bridge_setup() -> None:
     """Install (through Homebrew Channel) and connect the Remote Bridge app."""
     import secrets  # noqa: PLC0415
 
-    from .bridge import APP_ID, HBCHANNEL_ID, REPO_URL  # noqa: PLC0415
+    from .bridge import APP_ID, HBCHANNEL_ID  # noqa: PLC0415
 
     context = _bridge_context()
     if context is None:
@@ -498,27 +500,31 @@ def bridge_setup() -> None:
     if HBCHANNEL_ID not in apps:
         _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_NO_HBCHANNEL))
         return
-    if APP_ID not in apps:
-        if not _dialog().yesno(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_INSTALL_PROMPT)):
-            return
-        if not _call("app", [HBCHANNEL_ID, {"launchMode": "addRepository", "url": REPO_URL}]):
-            return
-        if not _wait(BRIDGE_INSTALL_WAIT, lang.BRIDGE_WAITING, lambda: APP_ID in _installed_apps()):
-            _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_INSTALL_TIMEOUT))
-            return
-
     addon = xbmcaddon.Addon("service.webostv")
-    token = addon.getSetting("bridge_token").strip()
-    if not token:
-        token = secrets.token_urlsafe(18)
-        addon.setSetting("bridge_token", token)
     try:
         port = int(addon.getSetting("bridge_port") or 9779)
     except ValueError:
         port = 9779
+    kodi_host = _local_ip(str(info.get("host")))
+    if APP_ID not in apps:
+        if not _dialog().yesno(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_INSTALL_PROMPT)):
+            return
+        if not _call("app", [HBCHANNEL_ID, {"launchMode": "addRepository",
+                                            "url": _repo_url(kodi_host, port)}]):
+            return
+        if not _wait(BRIDGE_INSTALL_WAIT, lang.BRIDGE_WAITING, lambda: APP_ID in _installed_apps()):
+            _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_INSTALL_TIMEOUT))
+            return
+    elif info.get("remote_bridge_outdated"):
+        _bridge_update(info, kodi_host, port, return_to)
+        return
+
+    token = addon.getSetting("bridge_token").strip()
+    if not token:
+        token = secrets.token_urlsafe(18)
+        addon.setSetting("bridge_token", token)
     addon.setSettingBool("remote_bridge", True)
-    params = {"kodiHost": _local_ip(str(info.get("host"))), "kodiPort": port, "token": token,
-              "returnTo": return_to}
+    params = {"kodiHost": kodi_host, "kodiPort": port, "token": token, "returnTo": return_to}
     if not _call("app", [APP_ID, params]):
         return
 
@@ -530,6 +536,48 @@ def bridge_setup() -> None:
         _dialog().notification(ADDON_NAME, lang.get(lang.BRIDGE_CONNECTED))
     else:
         _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_NOT_CONNECTED) % port)
+
+
+def _repo_url(kodi_host: str, port: int) -> str:
+    """The Homebrew Channel repository this Kodi serves (bridgerepo.py)."""
+    from .bridge import REPO_PORT_OFFSET  # noqa: PLC0415
+
+    return f"http://{kodi_host}:{port + REPO_PORT_OFFSET}/repo.json"
+
+
+def _bridge_update(info: dict[str, Any], kodi_host: str, port: int, return_to: str) -> None:
+    """Bring the TV's app up to the version this add-on carries."""
+    from . import bridgerepo  # noqa: PLC0415
+    from .bridge import APP_ID, HBCHANNEL_ID, REPO_PORT_OFFSET, SELF_UPDATE_SINCE  # noqa: PLC0415
+
+    bundled = bridgerepo.bundled()
+    installed = str(info.get("remote_bridge_version") or "?")
+    if bundled is None or not _dialog().yesno(
+            lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_UPDATE_PROMPT) % (installed, bundled["version"])):
+        return
+    if bridgerepo.version_tuple(installed) >= SELF_UPDATE_SINCE:
+        base = f"http://{kodi_host}:{port + REPO_PORT_OFFSET}"
+        launched = _call("app", [APP_ID, {"action": "update", "ipkUrl": f"{base}/{bundled['ipk']}",
+                                          "ipkHash": bundled["sha256"], "returnTo": return_to}])
+    else:
+        _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_UPDATE_REPO))
+        launched = _call("app", [HBCHANNEL_ID, {"launchMode": "addRepository",
+                                                "url": _repo_url(kodi_host, port)}])
+    if not launched:
+        return
+
+    def updated() -> bool:
+        reply = ipc.call("status")
+        result = reply.get("result") or {}
+        return bool(reply.get("ok") and result.get("remote_bridge_connected")
+                    and not result.get("remote_bridge_outdated"))
+
+    if _wait(BRIDGE_INSTALL_WAIT, lang.BRIDGE_UPDATING, updated):
+        if return_to:
+            _call("app", [return_to])  # in case the install closed the app before it switched back
+        _dialog().notification(ADDON_NAME, lang.get(lang.BRIDGE_UPDATED) % bundled["version"])
+    else:
+        _dialog().ok(lang.get(lang.BRIDGE_SETUP), lang.get(lang.BRIDGE_UPDATE_TIMEOUT))
 
 
 def bridge_remove() -> None:

@@ -42,12 +42,17 @@ import json
 from collections.abc import Callable
 from typing import Any
 
+from . import bridgerepo
 from . import kodilog as log
 from .settings import Settings
 
 APP_ID = "com.github.dangerouslaser.kodiremote"
 HBCHANNEL_ID = "org.webosbrew.hbchannel"
-REPO_URL = "https://dangerouslaser.github.io/webos/repo.json"
+# The TV app this add-on carries is served to the Homebrew Channel on the
+# bridge port + this (see bridgerepo.py).
+REPO_PORT_OFFSET = 1
+# The first TV app that can update itself ({"action": "update"}).
+SELF_UPDATE_SINCE = (0, 5, 0)
 
 HELLO_TIMEOUT = 5.0
 HEARTBEAT = 2.0
@@ -264,6 +269,8 @@ class RemoteBridge:
         self._server: asyncio.Server | None = None
         self._clients: dict[asyncio.StreamWriter, dict[str, Any]] = {}
         self._listening: tuple[bool, int, str] | None = None
+        self._repo = bridgerepo.RepoServer()
+        self._bundled = bridgerepo.bundled()
 
     async def start(self) -> None:
         await self._apply()
@@ -286,6 +293,7 @@ class RemoteBridge:
 
     async def close(self) -> None:
         await self._stop()
+        await self._repo.close()
         if self._mouse is not None:
             self._mouse.close()
 
@@ -296,7 +304,16 @@ class RemoteBridge:
             "remote_bridge_listening": self._server is not None,
             "remote_bridge_connected": client is not None,
             "remote_bridge_version": (client or {}).get("version", ""),
+            "remote_bridge_bundled": (self._bundled or {}).get("version", ""),
+            "remote_bridge_outdated": client is not None and self._outdated(client),
         }
+
+    def _outdated(self, info: dict[str, Any]) -> bool:
+        """The TV's app is older than the one this add-on carries."""
+        if self._bundled is None:
+            return False
+        return (bridgerepo.version_tuple(info.get("version", ""))
+                < bridgerepo.version_tuple(self._bundled["version"]))
 
     def refresh(self) -> None:
         """TV state changed: take the remote over or hand it back right away."""
@@ -355,9 +372,10 @@ class RemoteBridge:
 
     @property
     def state(self) -> str:
-        """"connected", "waiting" (listening for the TV) or "" (off)."""
+        """"connected", "outdated" (connected, older than the app this add-on
+        carries), "waiting" (listening for the TV) or "" (off)."""
         if self._clients:
-            return "connected"
+            return "outdated" if any(self._outdated(i) for i in self._clients.values()) else "connected"
         return "waiting" if self._server is not None else ""
 
     def _publish(self) -> None:
@@ -367,6 +385,9 @@ class RemoteBridge:
             self._on_change(state)
 
     async def _apply(self) -> None:
+        # Served even with the bridge off: setting it up installs the app first.
+        port = self.settings.bridge_port
+        await self._repo.start(port + REPO_PORT_OFFSET if port else 0)  # 0: any (tests)
         wanted = (self.settings.remote_bridge, self.settings.bridge_port, self.settings.bridge_token)
         if wanted == self._listening:
             return

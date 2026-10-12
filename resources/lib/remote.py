@@ -136,19 +136,17 @@ class Overlay:
                     self._window = None
             del window
 
-    def close(self, wait: bool = True) -> None:
-        """Close the window. wait=False (service stopping): from a thread of its
-        own, since closing a window takes the GUI lock, and Kodi may hold locks
-        the GUI needs while it stops the service (see WebOsService.shutdown)."""
+    def close(self, stopping: bool = False) -> None:
+        """Close the window. stopping (the service is): leave it to Kodi, which
+        ends a stopping script's modal windows itself. Closing it then takes the
+        GUI lock, which Kodi may hold while it stops us (see
+        WebOsService.shutdown), and it doesn't let go of Python meanwhile, so
+        not even another thread can do it."""
         with self._lock:
             self._closing = True
             window, self._window = self._window, None
-        if window is None:
-            return
-        if wait:
+        if window is not None and not stopping:
             window.close()
-        else:
-            threading.Thread(target=window.close, name="webostv-remote-close", daemon=True).start()
 
     def _handle(self, action_id: int) -> None:
         if action_id == PLAY_PAUSE:

@@ -27,7 +27,11 @@ def read_json(name: str, default: Any = None) -> Any:
 
 def write_json(name: str, value: Any) -> None:
     """Write atomically so a crash never leaves a truncated file."""
-    path = data_path(name)
+    write_json_at(data_path(name), value)
+
+
+def write_json_at(path: str, value: Any) -> None:
+    """write_json to a full path (no Kodi calls: safe while the service stops)."""
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as fh:
         json.dump(value, fh, indent=2, sort_keys=True)

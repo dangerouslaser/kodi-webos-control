@@ -156,6 +156,9 @@ class FocusKeeper:
         self.places = PointerMap()  # where focused things are, from pointer positions
         # Learned per skin: another skin (or version) has another layout.
         self._skin = f"{xbmc.getSkinDir()} {xbmc.getInfoLabel('System.AddonVersion(' + xbmc.getSkinDir() + ')')}"
+        # Resolved now: close() runs while Kodi stops the service, when Kodi
+        # calls (translatePath too) can deadlock.
+        self._places_path = storage.data_path(PLACES_FILE)
         saved = storage.read_json(PLACES_FILE, {})
         if isinstance(saved, dict) and saved.get("skin") == self._skin:
             self.places.load(saved)
@@ -274,7 +277,7 @@ class FocusKeeper:
             if handle is not None:
                 handle.cancel()
         try:
-            storage.write_json(PLACES_FILE, {"skin": self._skin, **self.places.dump()})
+            storage.write_json_at(self._places_path, {"skin": self._skin, **self.places.dump()})
         except OSError as err:
             log.warning(f"cannot save pointer places: {err}")
 
@@ -425,12 +428,13 @@ class _KodiSide:
         xbmc.executebuiltin("ShutDown()")
 
     def set_overlay(self, active: bool) -> None:
-        if not self._service.closing:
-            window = xbmcgui.Window(10000)
-            if active:
-                window.setProperty("WebOS.TransparentControl", "true")
-            else:
-                window.clearProperty("WebOS.TransparentControl")
+        if self._service.closing:
+            return  # no GUI calls while stopping; shutdown() deals with the window
+        window = xbmcgui.Window(10000)
+        if active:
+            window.setProperty("WebOS.TransparentControl", "true")
+        else:
+            window.clearProperty("WebOS.TransparentControl")
         if self._service.overlay is not None:
             self._service.overlay.set_active(active)
 
@@ -495,6 +499,9 @@ class WebOsService:
         from .tv import TvController  # noqa: PLC0415
         from .watcher import TvWatcher  # noqa: PLC0415
 
+        from . import storage  # noqa: PLC0415
+
+        self._stall_path = storage.data_path(STALL_FILE)  # resolved now: see _watch_shutdown
         self.publisher = PropertyPublisher()
         # Pointer state (a frozen Home section, the settings pad) from when the
         # service last stopped.
@@ -585,7 +592,7 @@ class WebOsService:
         if self.focus is not None:
             self.loop.call_soon_threadsafe(self.focus.close)
         if self.overlay is not None:
-            self.overlay.close(wait=False)
+            self.overlay.close(stopping=True)
         # Kodi kills a service that takes 5 s to stop (and then never restarts
         # it), so everything stops together within SHUTDOWN_BUDGET.
         try:
@@ -603,11 +610,13 @@ class WebOsService:
 
     def _watch_shutdown(self) -> None:
         """If stopping nears Kodi's 5 s limit, save every thread's stack to
-        shutdown-stall.txt (add-on data) to show what it's waiting on."""
-        from . import storage  # noqa: PLC0415
-
+        shutdown-stall.txt (add-on data) to show what it's waiting on. No Kodi
+        calls here (the path was resolved at start)."""
+        path = getattr(self, "_stall_path", None)
+        if path is None:
+            return
         try:
-            self._stall_file = open(storage.data_path(STALL_FILE), "w")  # noqa: SIM115
+            self._stall_file = open(path, "w")  # noqa: SIM115
             faulthandler.dump_traceback_later(STALL_AFTER, file=self._stall_file)
         except (OSError, ValueError, RuntimeError) as err:
             log.warning(f"cannot watch the shutdown: {err!r}")

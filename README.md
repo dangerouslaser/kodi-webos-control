@@ -189,16 +189,25 @@ usually don't have). Needs a rooted TV with [Homebrew Channel](https://github.co
 
 - **Set up Remote Bridge on the TV** (also on the skin's LG TV page): if the
   [Remote Bridge app](https://github.com/dangerouslaser/kodi-remote-bridge) isn't on the TV, Kodi opens
-  Homebrew Channel with its repository filled in; you confirm and install it on the TV. Kodi then
+  Homebrew Channel with its repository filled in; you confirm and install it on the TV. The add-on
+  carries the app (`resources/bridge/`, from `scripts/bundle_bridge.sh`) and serves that repository
+  itself on the bridge port + 1 (9780), so no internet is needed. Kodi then
   launches the app with this box's address and a token, and the app starts a small root daemon
   (its own systemd unit, re-created at boot by a Homebrew Channel startup hook) and switches the TV
   back to Kodi. No SSH.
-- The daemon reads the remote's input devices (read-only, so the TV still handles every button) and
-  streams presses to Kodi on TCP port 9779. Kodi acts on them only while its input is on screen.
+- **Updates**: when the TV runs an older bridge than the add-on carries, the status says
+  *Update available*; Update installs it (bridge 0.5.0 and later update in place, older ones through
+  Homebrew Channel once).
+- While Kodi is on screen the daemon takes the remote's input devices and streams presses, the
+  pointer and the wheel to Kodi on TCP port 9779; when the TV shows anything else it hands them back,
+  with the TV's pointer where Kodi's was. Short Home goes to Kodi's home, holding it to the TV's.
 - Presses become buttons of Kodi's remote keymap (`Input.ButtonEvent`, `R1`), so they mean what a
   remote's buttons mean in each window (OK selects in menus and opens the OSD in fullscreen video)
   and custom keymaps apply. Holding OK sends `menu` (context menu). Arrows repeat only while the TV
   sends repeats. Buttons with no mapping are logged once with their code.
+- The pointer uses the TV's own pointer images and settings (speed, size, shape, alignment,
+  auto-hide), which can also be changed from Kodi. After the D-pad hides it, it comes back on the
+  focused item; wake sensitivity and wheel speed are settings.
 - **Remove** stops the daemon and removes its startup hook; uninstall the app in Homebrew Channel
   to remove it completely.
 

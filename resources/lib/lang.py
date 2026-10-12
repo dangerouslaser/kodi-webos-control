@@ -42,6 +42,12 @@ BRIDGE_SETTING_UP = 32614
 BRIDGE_CONNECTED = 32615
 BRIDGE_NOT_CONNECTED = 32616
 BRIDGE_REMOVED = 32617
+BRIDGE_UPDATE_PROMPT = 32619
+BRIDGE_UPDATING = 32623
+BRIDGE_UPDATED = 32624
+BRIDGE_UPDATE_TIMEOUT = 32625
+BRIDGE_UPDATE_REPO = 32626
+BRIDGE_UPDATE_AVAILABLE = 32627
 TV_NOT_CONNECTED = 32618
 MOTION_LABELS = {"off": 32411, "cinemaClear": 32412, "natural": 32413, "smooth": 32414}
 
@@ -89,6 +95,12 @@ _FALLBACK = {
                           "the TV can reach this Kodi on TCP port %s (firewall, Docker port mapping), "
                           "then run Set up again.",
     BRIDGE_REMOVED: "Remote Bridge removed from the TV.",
+    BRIDGE_UPDATE_PROMPT: "The Remote Bridge app on the TV is version %s; this Kodi carries %s. Update it now?",
+    BRIDGE_UPDATING: "Updating Remote Bridge on the TV...",
+    BRIDGE_UPDATED: "Remote Bridge updated to %s.",
+    BRIDGE_UPDATE_TIMEOUT: "The Remote Bridge update didn't finish. Check Homebrew Channel on the TV, then run Set up again.",
+    BRIDGE_UPDATE_REPO: "This version of the TV app can't update itself. Kodi will open Homebrew Channel on the TV with this Kodi's repository: open Remote Bridge for Kodi there and update it. Kodi brings you back here when it's done.",
+    BRIDGE_UPDATE_AVAILABLE: "Update available",
     TV_NOT_CONNECTED: "The TV isn't connected.",
     32500: "OLED pixel brightness",
     32501: "HDR dynamic tone mapping",

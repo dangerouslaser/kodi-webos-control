@@ -803,6 +803,30 @@ msgctxt "#32693"
 msgid "Fast"
 msgstr ""
 
+msgctxt "#32619"
+msgid "The Remote Bridge app on the TV is version %s; this Kodi carries %s. Update it now?"
+msgstr ""
+
+msgctxt "#32623"
+msgid "Updating Remote Bridge on the TV..."
+msgstr ""
+
+msgctxt "#32624"
+msgid "Remote Bridge updated to %s."
+msgstr ""
+
+msgctxt "#32625"
+msgid "The Remote Bridge update didn't finish. Check Homebrew Channel on the TV, then run Set up again."
+msgstr ""
+
+msgctxt "#32626"
+msgid "This version of the TV app can't update itself. Kodi will open Homebrew Channel on the TV with this Kodi's repository: open Remote Bridge for Kodi there and update it. Kodi brings you back here when it's done."
+msgstr ""
+
+msgctxt "#32627"
+msgid "Update available"
+msgstr ""
+
 msgctxt "#32640"
 msgid "Low"
 msgstr ""

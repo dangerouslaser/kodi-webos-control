@@ -212,6 +212,7 @@ async def test_turning_it_off_closes_the_tv_connection(kodi_side):
 async def test_state_changes_are_published_for_skins(kodi_side):
     states: list[str] = []
     rb = RemoteBridge(BASE, kodi_side.execute, lambda: True, states.append)
+    rb._bundled = None  # no newer app to offer
     await rb.start()
     try:
         reader, writer = await connect(rb)
@@ -968,3 +969,19 @@ async def test_slow_wheel_starts_over_on_a_change_of_direction(kodi_side):
     mapper.wheel(1)       # half a step down is dropped, not taken off this
     mapper.wheel(1)
     assert kodi_side.actions == ["wheelup"]
+
+
+async def test_an_older_tv_app_is_reported_as_outdated(kodi_side, monkeypatch):
+    states: list[str] = []
+    rb = RemoteBridge(BASE, kodi_side.execute, lambda: True, states.append)
+    monkeypatch.setattr(rb, "_bundled", {"version": "0.5.0"})
+    await rb.start()
+    try:
+        reader, _writer = await connect(rb)  # says 0.1.0
+        await read_msg(reader)
+        await wait_for(lambda: rb.status()["remote_bridge_connected"])
+        assert rb.status()["remote_bridge_outdated"] is True
+        assert rb.status()["remote_bridge_bundled"] == "0.5.0"
+        assert states[-1] == "outdated"
+    finally:
+        await rb.close()
