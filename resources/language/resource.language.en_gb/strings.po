@@ -666,3 +666,43 @@ msgstr ""
 msgctxt "#32622"
 msgid "Not set up"
 msgstr ""
+
+msgctxt "#32605"
+msgid "Use the remote's pointer in Kodi"
+msgstr ""
+
+msgctxt "#32655"
+msgid "While Kodi is on screen, the Magic Remote's pointer moves Kodi's mouse and a click selects. The bridge takes the remote over from the TV then (no TV pointer or input banners) and hands back the buttons Kodi doesn't use, such as volume, Home and power."
+msgstr ""
+
+msgctxt "#32606"
+msgid "Pointer speed"
+msgstr ""
+
+msgctxt "#32656"
+msgid "How far Kodi's cursor moves for a movement of the remote. 100% follows the TV's own pointer exactly."
+msgstr ""
+
+msgctxt "#32640"
+msgid "50%"
+msgstr ""
+
+msgctxt "#32641"
+msgid "75%"
+msgstr ""
+
+msgctxt "#32642"
+msgid "100%"
+msgstr ""
+
+msgctxt "#32643"
+msgid "125%"
+msgstr ""
+
+msgctxt "#32644"
+msgid "150%"
+msgstr ""
+
+msgctxt "#32645"
+msgid "200%"
+msgstr ""

@@ -15,6 +15,8 @@ MOTION_MODES = ("", "off", "cinemaClear", "natural", "smooth")
 # Sound outputs a rule can pick; "" = leave unchanged.
 # Source-quality cleanup level; "" = leave unchanged.
 QUALITY_LEVELS = ("", "off", "low", "medium", "high")
+# Remote Bridge pointer speed (setting index -> factor).
+POINTER_SPEEDS = (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
 SOUND_RULE_OUTPUTS = ("", "tv_speaker", "external_arc", "external_optical", "bt_soundbar", "headphone")
 
 
@@ -24,6 +26,14 @@ def _option(addon: xbmcaddon.Addon, key: str, options: tuple[str, ...]) -> str:
     except ValueError:
         index = 0
     return options[index] if 0 <= index < len(options) else options[0]
+
+
+def _speed(addon: xbmcaddon.Addon) -> float:
+    try:
+        index = int(addon.getSetting("bridge_pointer_speed") or 2)
+    except ValueError:
+        index = 2
+    return POINTER_SPEEDS[index] if 0 <= index < len(POINTER_SPEEDS) else 1.0
 
 
 @dataclass(frozen=True)
@@ -54,6 +64,8 @@ class Settings:
     remote_bridge: bool = False
     bridge_port: int = 9779
     bridge_token: str = ""
+    bridge_pointer: bool = False
+    bridge_pointer_speed: float = 1.0
     # Motion smoothing by frame rate (blind writes: TVs won't report it)
     motion_film: str = ""
     motion_video: str = ""
@@ -102,6 +114,8 @@ class Settings:
             remote_bridge=addon.getSettingBool("remote_bridge"),
             bridge_port=int(number("bridge_port", 9779)),
             bridge_token=addon.getSetting("bridge_token").strip(),
+            bridge_pointer=addon.getSettingBool("bridge_pointer"),
+            bridge_pointer_speed=_speed(addon),
             motion_film=_option(addon, "motion_film", MOTION_MODES),
             motion_video=_option(addon, "motion_video", MOTION_MODES),
             motion_restore=_option(addon, "motion_restore", MOTION_MODES),

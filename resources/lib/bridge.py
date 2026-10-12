@@ -5,16 +5,28 @@ runs a small daemon that reads the remote's input devices and streams every
 button press here over TCP. Presses become Kodi actions while Kodi's input is
 on screen and are ignored otherwise; the TV keeps handling them as usual.
 
+With the pointer on, Kodi has the daemon take the remote over while Kodi is on
+screen ("grab"): the TV then draws no pointer of its own and shows no input
+banners, the pointer moves Kodi's mouse, and the daemon hands every button Kodi
+doesn't use (volume, Home, power...) back to the TV. The grab message doubles as
+a heartbeat; the daemon releases the remote when it stops.
+
 Protocol, one JSON object per line:
-    <- {"hello": {"token", "version", "node", "arch", "devices": [names]}}
+    <- {"hello": {"token", "version", "python", "devices", "pointer": [max_x, max_y]}}
     -> {"ok": true}
     <- {"key": code, "value": 0 up | 1 down | 2 repeat, "dev": index}
     <- {"wheel": steps, "dev": index}
+    <- {"pos": [x, y]}                  while taken over with the pointer on
+    -> {"grab": bool, "consume": [codes], "pointer": bool}   on change and every 2 s
+    <- {"cursor": {"point", "hover", "hold", "drag": base64 PNG}}   the TV's own pointer
+                                        images, once per connection (see cursor.py)
 """
 
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import contextlib
 import hmac
 import json
@@ -29,7 +41,15 @@ HBCHANNEL_ID = "org.webosbrew.hbchannel"
 REPO_URL = "https://dangerouslaser.github.io/webos/repo.json"
 
 HELLO_TIMEOUT = 5.0
-MAX_LINE = 4096
+HEARTBEAT = 2.0
+# Pointer speeds other than 1 move the cursor by the remote's motion, scaled;
+# a pause this long starts a new stroke from where the cursor is.
+STROKE_GAP = 0.4
+# The Magic Remote's pointer click (BTN_LEFT); only used with the pointer on.
+POINTER_CLICK = 272
+# Lines carry the TV's cursor images (a few KB each).
+MAX_LINE = 1024 * 1024
+CURSOR_MAX = 256 * 1024
 # Holding OK this long opens the context menu instead of selecting.
 LONG_PRESS = 0.6
 # Held arrows repeat only on the TV's own repeat events (every 50 ms after
@@ -168,11 +188,17 @@ class RemoteBridge:
 
     def __init__(self, settings: Settings, execute: Callable[[str], None],
                  on_screen: Callable[[], bool],
-                 on_change: Callable[[str], None] | None = None) -> None:
+                 on_change: Callable[[str], None] | None = None,
+                 mouse: Any = None,
+                 on_cursor: Callable[[dict[str, bytes]], None] | None = None) -> None:
         self.settings = settings
         self.mapper = KeyMapper(execute, on_screen)
+        self._on_screen = on_screen
         self._on_change = on_change
+        self._mouse = mouse
+        self._on_cursor = on_cursor
         self._published: str | None = None
+        self._heartbeat: asyncio.Task | None = None
         self._server: asyncio.Server | None = None
         self._clients: dict[asyncio.StreamWriter, dict[str, Any]] = {}
         self._listening: tuple[bool, int, str] | None = None
@@ -182,11 +208,14 @@ class RemoteBridge:
 
     def update(self, settings: Settings) -> None:
         self.settings = settings
+        self.refresh()
         task = asyncio.ensure_future(self._apply())
         task.add_done_callback(_log_error)
 
     async def close(self) -> None:
         await self._stop()
+        if self._mouse is not None:
+            self._mouse.close()
 
     def status(self) -> dict[str, Any]:
         client = next(iter(self._clients.values()), None)
@@ -196,6 +225,31 @@ class RemoteBridge:
             "remote_bridge_connected": client is not None,
             "remote_bridge_version": (client or {}).get("version", ""),
         }
+
+    def refresh(self) -> None:
+        """TV state changed: take the remote over or hand it back right away."""
+        for writer, info in self._clients.items():
+            if info.get("grab") != self._grab_wanted():
+                self._send_grab(writer, info)
+
+    def _grab_wanted(self) -> bool:
+        return self.settings.bridge_pointer and self._on_screen()
+
+    def _send_grab(self, writer: asyncio.StreamWriter, info: dict[str, Any]) -> None:
+        grab = self._grab_wanted()
+        info["grab"] = grab
+        consume = sorted({*KEY_BUTTONS, POINTER_CLICK})
+        msg = {"grab": grab, "consume": consume, "pointer": self.settings.bridge_pointer}
+        with contextlib.suppress(OSError, RuntimeError):
+            writer.write(json.dumps(msg).encode() + b"\n")
+
+    async def _beat(self) -> None:
+        while True:
+            await asyncio.sleep(HEARTBEAT)
+            for writer, info in list(self._clients.items()):
+                self._send_grab(writer, info)
+            if self._mouse is not None and self.settings.bridge_pointer:
+                self._mouse.ping()
 
     @property
     def state(self) -> str:
@@ -229,10 +283,14 @@ class RemoteBridge:
             self._publish()
             return
         log.info(f"remote bridge: listening on port {port}")
+        self._heartbeat = asyncio.ensure_future(self._beat())
         self._publish()
 
     async def _stop(self) -> None:
         self._listening = None
+        if self._heartbeat is not None:
+            self._heartbeat.cancel()
+            self._heartbeat = None
         server, self._server = self._server, None
         for writer in list(self._clients):
             writer.close()
@@ -252,15 +310,18 @@ class RemoteBridge:
                 return
             writer.write(b'{"ok": true}\n')
             await writer.drain()
-            self._clients[writer] = {"version": str(hello.get("version", "")), "peer": peer}
+            info = {"version": str(hello.get("version", "")), "peer": peer,
+                    "pointer": _pointer_range(hello.get("pointer"))}
+            self._clients[writer] = info
+            self._send_grab(writer, info)
             self._publish()
             log.info(f"remote bridge: TV at {peer} connected (bridge {hello.get('version', '?')}, "
-                     f"node {hello.get('node', '?')}, devices {hello.get('devices', [])})")
+                     f"{_runtime(hello)}, devices {hello.get('devices', [])})")
             while True:
                 line = await reader.readline()
                 if not line:
                     break
-                self._message(line)
+                self._message(line, info)
         except (OSError, asyncio.IncompleteReadError, asyncio.LimitOverrunError, ValueError,
                 asyncio.TimeoutError):
             pass
@@ -284,7 +345,7 @@ class RemoteBridge:
             return None
         return hello
 
-    def _message(self, line: bytes) -> None:
+    def _message(self, line: bytes, info: dict[str, Any]) -> None:
         try:
             msg = json.loads(line)
         except ValueError:
@@ -297,10 +358,67 @@ class RemoteBridge:
             except (TypeError, ValueError):
                 return
             log.debug(f"remote bridge: key {code} {value} (device {msg.get('dev')})")
+            if code == POINTER_CLICK:
+                if self.settings.bridge_pointer:
+                    self.mapper.key(28, value)  # a click selects what the pointer is over
+                return
             self.mapper.key(code, value)
+        elif "cursor" in msg:
+            if self._on_cursor is not None and isinstance(msg["cursor"], dict):
+                self._on_cursor(_decode_images(msg["cursor"]))
+        elif "pos" in msg:
+            if self._mouse is None or not self.settings.bridge_pointer or not self._on_screen():
+                return
+            try:
+                x, y = (int(v) for v in msg["pos"])
+            except (TypeError, ValueError):
+                return
+            max_x, max_y = info["pointer"]
+            cx, cy = self._cursor(info, x, y, max_x, max_y)
+            self._mouse.move(round(cx), round(cy), max_x, max_y)
         elif "wheel" in msg:
             with contextlib.suppress(TypeError, ValueError):
                 self.mapper.wheel(int(msg["wheel"]))
+
+
+    def _cursor(self, info: dict[str, Any], x: int, y: int, max_x: int, max_y: int) -> tuple[float, float]:
+        """Where Kodi's cursor goes for the remote's absolute position x, y."""
+        speed = self.settings.bridge_pointer_speed
+        now = asyncio.get_running_loop().time()
+        last, last_at, cursor = info.get("raw"), info.get("raw_at", 0.0), info.get("cursor")
+        info["raw"], info["raw_at"] = (x, y), now
+        if speed == 1.0 or cursor is None:
+            cursor = (float(x), float(y))
+        elif last is not None and now - last_at <= STROKE_GAP:
+            cursor = (min(max(cursor[0] + (x - last[0]) * speed, 0.0), float(max_x)),
+                      min(max(cursor[1] + (y - last[1]) * speed, 0.0), float(max_y)))
+        # else: a new stroke starts where the cursor already is
+        info["cursor"] = cursor
+        return cursor
+
+
+def _decode_images(raw: dict[str, Any]) -> dict[str, bytes]:
+    images = {}
+    for kind, text in raw.items():
+        if not isinstance(text, str) or len(text) > CURSOR_MAX * 4 // 3 + 4:
+            continue
+        with contextlib.suppress(binascii.Error, ValueError):
+            images[str(kind)] = base64.b64decode(text, validate=True)
+    return images
+
+
+def _pointer_range(value: Any) -> tuple[int, int]:
+    try:
+        x, y = (int(v) for v in value)
+    except (TypeError, ValueError):
+        return 1920, 1080
+    return (x if x > 0 else 1920), (y if y > 0 else 1080)
+
+
+def _runtime(hello: dict[str, Any]) -> str:
+    if hello.get("python"):
+        return f"python {hello['python']}"
+    return f"node {hello.get('node', '?')}"
 
 
 def _log_error(task: asyncio.Future) -> None:

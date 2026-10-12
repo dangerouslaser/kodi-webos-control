@@ -27,6 +27,9 @@ ADDON_ID = "service.webostv"
 ADDON_NAME = "LG webOS TV"
 SHUTDOWN_TIMEOUT = 1.0
 LOCK_FILE = "service.lock"
+# Skin properties for the TV's own pointer images (see cursor.py).
+POINTER_PROPERTIES = {"point": "WebOS.Pointer", "hover": "WebOS.PointerFocus",
+                      "hold": "WebOS.PointerClick", "drag": "WebOS.PointerDrag"}
 
 
 class _Monitor(xbmc.Monitor):
@@ -89,6 +92,18 @@ def _press_button(name: str) -> None:
         "jsonrpc": "2.0", "id": 1, "method": "Input.ButtonEvent",
         "params": {"button": name, "keymap": "R1"},
     }))
+
+
+def _eventserver_port() -> int:
+    """Kodi's EventServer port (Settings > Services > Control)."""
+    try:
+        reply = json.loads(xbmc.executeJSONRPC(json.dumps({
+            "jsonrpc": "2.0", "id": 1, "method": "Settings.GetSettingValue",
+            "params": {"setting": "services.esport"},
+        })))
+        return int(reply["result"]["value"])
+    except (KeyError, TypeError, ValueError):
+        return 9777
 
 
 def _log_task_error(task: Any) -> None:
@@ -185,6 +200,7 @@ class WebOsService:
         # Lazy imports: only pay for aiowebostv/websockets once we know we run.
         from .automations import PlaybackRules  # noqa: PLC0415
         from .bridge import RemoteBridge  # noqa: PLC0415
+        from .eventserver import EventServerMouse  # noqa: PLC0415
         from .remote import Overlay  # noqa: PLC0415
         from .soundrules import SoundRules  # noqa: PLC0415
         from .state import PropertyPublisher  # noqa: PLC0415
@@ -212,7 +228,8 @@ class WebOsService:
             self.sound = SoundRules(self.controller, self.settings)
             self.watcher = TvWatcher(self.controller, self.settings, _KodiSide(self))
             self.bridge = RemoteBridge(self.settings, _press_button, self._kodi_on_screen,
-                                       self._bridge_changed)
+                                       self._bridge_changed, EventServerMouse(_eventserver_port()),
+                                       self._tv_cursor)
             await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
@@ -306,6 +323,9 @@ class WebOsService:
     def _on_state(self, state: Any) -> None:
         """Loop thread: every TvState the controller publishes."""
         self.publisher.publish(state)
+        if self.bridge is not None:
+            # Take the remote over or hand it back as Kodi comes and goes.
+            self.bridge.refresh()
         # Refresh launcher.json (plugin listings) when apps or inputs change.
         key = (tuple(a for a, _t in state.apps), tuple(i[0] for i in state.inputs))
         if state.connected and state.apps and key != self._launcher_key:
@@ -394,6 +414,27 @@ class WebOsService:
             window.setProperty("WebOS.RemoteBridge", state)
         else:
             window.clearProperty("WebOS.RemoteBridge")
+
+    def _tv_cursor(self, images: dict[str, bytes]) -> None:
+        """Loop thread: the TV's own pointer images, for the skin's Pointer.xml."""
+        from . import cursor, storage  # noqa: PLC0415
+
+        async def install() -> None:
+            assert self.loop is not None
+            paths = await self.loop.run_in_executor(
+                None, cursor.install, images, storage.data_path("pointer"))
+            if self.closing:
+                return
+            window = xbmcgui.Window(10000)
+            for kind, prop in POINTER_PROPERTIES.items():
+                if kind in paths:
+                    window.setProperty(prop, paths[kind])
+                else:
+                    window.clearProperty(prop)
+            log.info(f"remote bridge: using the TV's own pointer ({', '.join(sorted(paths))})")
+
+        task = asyncio.ensure_future(install())
+        task.add_done_callback(_log_task_error)
 
     def _kodi_on_screen(self) -> bool:
         """Loop thread: True only when the TV is known to be showing Kodi."""
