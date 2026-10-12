@@ -115,14 +115,14 @@ async def test_unmapped_button_is_logged_once(mapper, kodi_side, kodi):
 async def test_wheel_scrolls(mapper, kodi_side):
     mapper.wheel(2)
     mapper.wheel(-1)
-    assert kodi_side.actions == ["up", "up", "down"]
+    assert kodi_side.actions == ["wheelup", "wheelup", "wheeldown"]
 
 
 async def test_magic_remote_back_and_wheel_buttons(mapper, kodi_side):
     for code in (412, 1198, 1199):
         mapper.key(code, KEY_DOWN)
         mapper.key(code, KEY_UP)
-    assert kodi_side.actions == ["back", "up", "down"]
+    assert kodi_side.actions == ["back", "wheelup", "wheeldown"]
 
 
 # server -------------------------------------------------------------------
@@ -402,3 +402,81 @@ async def test_tvs_cursor_images_are_handed_to_kodi(kodi_side):
         assert got == [({"point": png}, "corner")]
     finally:
         await rb.close()
+
+
+async def test_pointer_stays_hidden_after_a_button_until_the_remote_really_moves(kodi_side):
+    mouse = Mouse()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+
+        async def send(*msgs):
+            for msg in msgs:
+                writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.05)
+
+        await send({"pos": [900, 500]})
+        await send({"key": 108, "value": 1}, {"key": 108, "value": 0})  # Down
+        await send({"pos": [905, 503]}, {"pos": [890, 520]})           # hand jitter
+        assert [m[:2] for m in mouse.moves] == [(900, 500)]
+        await send({"pos": [1100, 600]})                                # a real move
+        assert [m[:2] for m in mouse.moves] == [(900, 500), (1100, 600)]
+        await send({"key": 272, "value": 1}, {"key": 272, "value": 0}, {"pos": [1102, 601]})
+        assert mouse.moves[-1][:2] == (1102, 601)  # a click keeps the pointer
+        await send({"wheel": -1}, {"pos": [1110, 605]})
+        assert mouse.moves[-1][:2] == (1102, 601)  # so does nothing after the wheel
+    finally:
+        await rb.close()
+
+
+@pytest.mark.parametrize(("container", "skin", "expect"), [
+    ("12", "", "trigger"),                       # vertical list: analog scroll
+    ("12", "WebOS.WheelSideways", "right"),      # a row: one item sideways
+    ("12", "WebOS.WheelButtons", "down"),        # a grid panel: one row down
+    ("", "", "down"),                            # not a list
+])
+def test_wheel_scrolls_lists_along_their_direction(kodi, container, skin, expect):
+    from resources.lib.service import SCROLL_AMOUNT, WebOsService
+
+    service = WebOsService()
+    service.mouse = Mouse()
+    service.mouse.analog = lambda button, amount: service.mouse.moves.append((button, amount))
+    kodi.info_labels["System.CurrentControlID"] = "500"
+    kodi.info_labels["Container(500).NumItems"] = container
+    if skin:
+        kodi.info_labels[f"Window(Home).Property({skin})"] = "Control.HasFocus(500)"
+        kodi.conditions["Control.HasFocus(500)"] = True
+    service._remote_button("wheeldown")
+    if expect == "trigger":
+        assert service.mouse.moves == [("rightanalogtrigger", SCROLL_AMOUNT)]
+        assert round(255 * SCROLL_AMOUNT) ** 2 / 255**2 > 0.4  # one item per notch
+    else:
+        assert service.mouse.moves == []
+        assert kodi.jsonrpc_calls[-1]["params"] == {"button": expect, "keymap": "R1"}
+
+
+def test_eventserver_analog_button_packet():
+    import socket
+    import struct
+
+    from resources.lib.eventserver import HEADER, PT_BUTTON, EventServerMouse
+
+    server = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    server.bind(("127.0.0.1", 0))
+    server.settimeout(2)
+    es = EventServerMouse(server.getsockname()[1])
+    try:
+        es.analog("leftanalogtrigger", 0.5)
+        server.recv(1024)  # HELO
+        packet = server.recv(1024)
+    finally:
+        es.close()
+        server.close()
+    assert PT_BUTTON == 0x03  # Kodi's value
+    assert HEADER.unpack(packet[:32])[3] == PT_BUTTON
+    code, flags, amount = struct.unpack("!HHH", packet[32:38])
+    assert (code, flags, amount) == (0, 0x01 | 0x02 | 0x08 | 0x10 | 0x20, 32768)
+    assert packet[38:] == b"XG\0leftanalogtrigger\0"

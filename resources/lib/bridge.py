@@ -46,6 +46,9 @@ HEARTBEAT = 2.0
 # Pointer speeds other than 1 move the cursor by the remote's motion, scaled;
 # a pause this long starts a new stroke from where the cursor is.
 STROKE_GAP = 0.4
+# After a button press the pointer stays hidden until the remote moves this
+# far (in the TV's 1920-wide coordinates); hand jitter doesn't bring it back.
+POINTER_WAKE = 80
 # The Magic Remote's pointer click (BTN_LEFT); only used with the pointer on.
 POINTER_CLICK = 272
 # Lines carry the TV's cursor images (a few KB each).
@@ -57,6 +60,10 @@ LONG_PRESS = 0.6
 # 0.5 s on a G5), so nothing can keep repeating once the TV stops sending.
 # This caps how fast they move Kodi.
 REPEAT_MIN_INTERVAL = 0.08
+
+# Not remote buttons: the service scrolls the focused list along its own
+# direction (left/right in a horizontal row).
+WHEEL_UP, WHEEL_DOWN = "wheelup", "wheeldown"
 
 # Linux input key codes (linux/input-event-codes.h) -> buttons of Kodi's
 # remote keymap (remote.xml, "R1"). Kodi resolves them per window, like a
@@ -89,8 +96,8 @@ KEY_BUTTONS: dict[int, str] = {
     403: "channelminus",  # KEY_CHANNELDOWN
     # LG Magic Remote (seen on a G5, webOS 10)
     412: "back",          # KEY_PREVIOUS: the Back button
-    1198: "up",           # scroll wheel up, one press per notch
-    1199: "down",         # scroll wheel down
+    1198: WHEEL_UP,       # scroll wheel, one press per notch
+    1199: WHEEL_DOWN,
 }
 REPEATING = frozenset({"up", "down", "left", "right"})
 # Held OK: "menu" is the context menu in lists and the OSD in fullscreen video.
@@ -127,9 +134,7 @@ class KeyMapper:
     def wheel(self, steps: int) -> None:
         if not self._active():
             return
-        # Up/down rather than scrolling: the remote's wheel moves the focus,
-        # the way it does in the TV's own menus.
-        action = "up" if steps > 0 else "down"
+        action = WHEEL_UP if steps > 0 else WHEEL_DOWN
         for _ in range(min(abs(steps), 5)):
             self._execute(action)
 
@@ -363,6 +368,9 @@ class RemoteBridge:
                 if self.settings.bridge_pointer:
                     self.mapper.key(28, value)  # a click selects what the pointer is over
                 return
+            if value == KEY_DOWN and code in KEY_BUTTONS:
+                # Kodi hides its mouse on a button press; keep it hidden.
+                info["hidden_at"] = info.get("raw") or (-POINTER_WAKE, -POINTER_WAKE)
             self.mapper.key(code, value)
         elif "cursor" in msg:
             if self._on_cursor is not None and isinstance(msg["cursor"], dict):
@@ -374,11 +382,17 @@ class RemoteBridge:
                 x, y = (int(v) for v in msg["pos"])
             except (TypeError, ValueError):
                 return
+            hidden_at = info.get("hidden_at")
+            if hidden_at is not None:
+                if abs(x - hidden_at[0]) + abs(y - hidden_at[1]) < POINTER_WAKE:
+                    return
+                info.pop("hidden_at")
             max_x, max_y = info["pointer"]
             cx, cy = self._cursor(info, x, y, max_x, max_y)
             self._mouse.move(round(cx), round(cy), max_x, max_y)
         elif "wheel" in msg:
             with contextlib.suppress(TypeError, ValueError):
+                info["hidden_at"] = info.get("raw") or (-POINTER_WAKE, -POINTER_WAKE)
                 self.mapper.wheel(int(msg["wheel"]))
 
 

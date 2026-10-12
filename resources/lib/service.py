@@ -27,6 +27,13 @@ ADDON_ID = "service.webostv"
 ADDON_NAME = "LG webOS TV"
 SHUTDOWN_TIMEOUT = 1.0
 LOCK_FILE = "service.lock"
+# Remote Bridge wheel -> (gamepad trigger mapped to ScrollUp/ScrollDown in
+# gamepad.xml, remote button outside lists, remote button in a horizontal row).
+WHEEL = {"wheelup": ("leftanalogtrigger", "up", "left"),
+         "wheeldown": ("rightanalogtrigger", "down", "right")}
+# Kodi's lists move one item once the squared analog amount passes 0.4; the
+# trigger arrives in 1/255 steps, and 162/255 squared is just over it.
+SCROLL_AMOUNT = 162.4 / 255
 
 
 class _Monitor(xbmc.Monitor):
@@ -89,6 +96,14 @@ def _press_button(name: str) -> None:
         "jsonrpc": "2.0", "id": 1, "method": "Input.ButtonEvent",
         "params": {"button": name, "keymap": "R1"},
     }))
+
+
+def _skin_says(prop: str) -> bool:
+    """A condition the skin publishes on Window(Home) (Estuary LG: which
+    containers the wheel moves by button). Infolabels only: xbmcgui control
+    access from this thread crashes Kodi."""
+    condition = xbmc.getInfoLabel(f"Window(Home).Property({prop})")
+    return bool(condition) and xbmc.getCondVisibility(condition)
 
 
 def _eventserver_port() -> int:
@@ -162,6 +177,7 @@ class WebOsService:
         self.sound: Any = None
         self.watcher: Any = None
         self.bridge: Any = None
+        self.mouse: Any = None
         self._inputs: tuple = ()
         self._launcher_key: tuple = ()
         self._lock_fd: int | None = None
@@ -224,9 +240,9 @@ class WebOsService:
             self.rules = PlaybackRules(self.controller, self.settings)
             self.sound = SoundRules(self.controller, self.settings)
             self.watcher = TvWatcher(self.controller, self.settings, _KodiSide(self))
-            self.bridge = RemoteBridge(self.settings, _press_button, self._kodi_on_screen,
-                                       self._bridge_changed, EventServerMouse(_eventserver_port()),
-                                       self._tv_cursor)
+            self.mouse = EventServerMouse(_eventserver_port())
+            self.bridge = RemoteBridge(self.settings, self._remote_button, self._kodi_on_screen,
+                                       self._bridge_changed, self.mouse, self._tv_cursor)
             await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
@@ -432,6 +448,26 @@ class WebOsService:
 
         task = asyncio.ensure_future(install())
         task.add_done_callback(_log_task_error)
+
+    def _remote_button(self, name: str) -> None:
+        """Loop thread: a Remote Bridge button; the wheel scrolls what has focus."""
+        wheel = WHEEL.get(name)
+        if wheel is None:
+            _press_button(name)
+            return
+        trigger, button, sideways = wheel
+        control = xbmc.getInfoLabel("System.CurrentControlID")
+        if _skin_says("WebOS.WheelSideways"):
+            # A horizontal row (the skin says which): one item per notch.
+            _press_button(sideways)
+        elif _skin_says("WebOS.WheelButtons"):
+            # A grid panel, whose analog scroll needs several notches per row.
+            _press_button(button)
+        elif control and xbmc.getInfoLabel(f"Container({control}).NumItems") and self.mouse:
+            # A vertical list: Kodi's analog scroll, one item per notch.
+            self.mouse.analog(trigger, SCROLL_AMOUNT)
+        else:
+            _press_button(button)
 
     def _kodi_on_screen(self) -> bool:
         """Loop thread: True only when the TV is known to be showing Kodi."""
