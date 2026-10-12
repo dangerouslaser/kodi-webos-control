@@ -386,17 +386,19 @@ async def test_pointer_speed_scales_motion_and_new_strokes_dont_jump(kodi_side, 
 async def test_tvs_cursor_images_are_handed_to_kodi(kodi_side):
     import base64
 
-    got: list[dict[str, bytes]] = []
-    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(), got.append)
+    got: list[tuple[dict[str, bytes], str]] = []
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(),
+                      lambda images, hotspot: got.append((images, hotspot)))
     await rb.start()
     try:
         reader, writer = await connect_pointer(rb)
         await read_msg(reader)
         png = b"\x89PNG\r\n\x1a\n" + b"x" * 20000  # bigger than one old-style line
-        msg = {"cursor": {"point": base64.b64encode(png).decode(), "hover": "not base64!"}}
+        msg = {"cursor": {"point": base64.b64encode(png).decode(), "hover": "not base64!"},
+               "hotspot": "corner"}
         writer.write(json.dumps(msg).encode() + b"\n")
         await writer.drain()
         await wait_for(lambda: got)
-        assert got == [{"point": png}]
+        assert got == [({"point": png}, "corner")]
     finally:
         await rb.close()

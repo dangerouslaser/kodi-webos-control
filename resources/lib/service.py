@@ -27,9 +27,6 @@ ADDON_ID = "service.webostv"
 ADDON_NAME = "LG webOS TV"
 SHUTDOWN_TIMEOUT = 1.0
 LOCK_FILE = "service.lock"
-# Skin properties for the TV's own pointer images (see cursor.py).
-POINTER_PROPERTIES = {"point": "WebOS.Pointer", "hover": "WebOS.PointerFocus",
-                      "hold": "WebOS.PointerClick", "drag": "WebOS.PointerDrag"}
 
 
 class _Monitor(xbmc.Monitor):
@@ -415,23 +412,23 @@ class WebOsService:
         else:
             window.clearProperty("WebOS.RemoteBridge")
 
-    def _tv_cursor(self, images: dict[str, bytes]) -> None:
-        """Loop thread: the TV's own pointer images, for the skin's Pointer.xml."""
+    def _tv_cursor(self, images: dict[str, bytes], hotspot: str) -> None:
+        """Loop thread: the TV's own pointer images, for the skin's Pointer.xml.
+
+        Kodi loads pointer textures when the skin loads, so new or changed
+        images (first connection, a firmware update) need a skin reload;
+        never during playback, where they wait for the next one.
+        """
         from . import cursor, storage  # noqa: PLC0415
 
         async def install() -> None:
             assert self.loop is not None
-            paths = await self.loop.run_in_executor(
-                None, cursor.install, images, storage.data_path("pointer"))
-            if self.closing:
-                return
-            window = xbmcgui.Window(10000)
-            for kind, prop in POINTER_PROPERTIES.items():
-                if kind in paths:
-                    window.setProperty(prop, paths[kind])
-                else:
-                    window.clearProperty(prop)
-            log.info(f"remote bridge: using the TV's own pointer ({', '.join(sorted(paths))})")
+            paths, changed = await self.loop.run_in_executor(
+                None, cursor.install, images, storage.data_path("pointer"), hotspot)
+            log.info(f"remote bridge: using the TV's own pointer ({', '.join(sorted(paths))})"
+                     + (", new images" if changed else ""))
+            if changed and not self.closing and not xbmc.getCondVisibility("Player.HasMedia"):
+                xbmc.executebuiltin("ReloadSkin()")
 
         task = asyncio.ensure_future(install())
         task.add_done_callback(_log_task_error)

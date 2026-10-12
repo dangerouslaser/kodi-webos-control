@@ -94,6 +94,16 @@ def tip(width: int, height: int, pixels: bytearray, threshold: int = 128) -> tup
     return 0, 0
 
 
+def corner(width: int, height: int, pixels: bytearray, threshold: int = 128) -> tuple[int, int]:
+    """The pointer's hotspot when it's the shape's pointed top-left corner."""
+    best: tuple[int, int, int] | None = None
+    for y in range(height):
+        for x in range(width):
+            if pixels[(y * width + x) * 4 + 3] >= threshold and (best is None or x + y < best[0]):
+                best = (x + y, x, y)
+    return (best[1], best[2]) if best else (0, 0)
+
+
 def place(width: int, height: int, pixels: bytearray, hotspot: tuple[int, int],
           canvas: tuple[int, int], at: tuple[int, int]) -> bytearray:
     """Copy the image onto a transparent canvas so its hotspot lands on `at` (clipped)."""

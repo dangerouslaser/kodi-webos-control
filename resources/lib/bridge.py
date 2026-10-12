@@ -18,8 +18,9 @@ Protocol, one JSON object per line:
     <- {"wheel": steps, "dev": index}
     <- {"pos": [x, y]}                  while taken over with the pointer on
     -> {"grab": bool, "consume": [codes], "pointer": bool}   on change and every 2 s
-    <- {"cursor": {"point", "hover", "hold", "drag": base64 PNG}}   the TV's own pointer
-                                        images, once per connection (see cursor.py)
+    <- {"cursor": {"point", "hover", "hold", "drag": base64 PNG}, "hotspot": rule}
+                                        the TV's own pointer images, once per
+                                        connection (see cursor.py)
 """
 
 from __future__ import annotations
@@ -190,7 +191,7 @@ class RemoteBridge:
                  on_screen: Callable[[], bool],
                  on_change: Callable[[str], None] | None = None,
                  mouse: Any = None,
-                 on_cursor: Callable[[dict[str, bytes]], None] | None = None) -> None:
+                 on_cursor: Callable[[dict[str, bytes], str], None] | None = None) -> None:
         self.settings = settings
         self.mapper = KeyMapper(execute, on_screen)
         self._on_screen = on_screen
@@ -365,7 +366,7 @@ class RemoteBridge:
             self.mapper.key(code, value)
         elif "cursor" in msg:
             if self._on_cursor is not None and isinstance(msg["cursor"], dict):
-                self._on_cursor(_decode_images(msg["cursor"]))
+                self._on_cursor(_decode_images(msg["cursor"]), str(msg.get("hotspot") or "tip"))
         elif "pos" in msg:
             if self._mouse is None or not self.settings.bridge_pointer or not self._on_screen():
                 return

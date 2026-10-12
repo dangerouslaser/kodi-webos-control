@@ -71,6 +71,23 @@ def test_tip_is_the_top_of_the_finger():
     assert pngutil.tip(24, 20, image(24, 20, finger)) == (10, 3)
 
 
+# The current webOS pointer: a shape whose click point is its top-left corner.
+def pointed_circle(x, y):
+    return (x >= 4 and y >= 4) and ((x - 14) ** 2 + (y - 14) ** 2 <= 100 or (x <= 14 and y <= 14))
+
+
+def test_corner_is_the_pointed_corner():
+    assert pngutil.corner(30, 30, image(30, 30, pointed_circle)) == (4, 4)
+    assert pngutil.tip(30, 30, image(30, 30, pointed_circle)) != (4, 4)  # why "tip" won't do
+
+
+def test_install_puts_the_corner_on_the_hotspot(tmp_path):
+    png = encode(30, 30, image(30, 30, pointed_circle), [0])
+    paths, _ = cursor.install({"point": png}, str(tmp_path), hotspot="corner")
+    w, h, px = pngutil.read_rgba(open(paths["point"], "rb").read())
+    assert pngutil.corner(w, h, px) == cursor.HOTSPOT
+
+
 def test_rejects_what_it_cant_read():
     with pytest.raises(pngutil.PngError):
         pngutil.read_rgba(b"not a png")
@@ -78,12 +95,14 @@ def test_rejects_what_it_cant_read():
 
 def test_install_lays_pointers_out_for_the_skin(tmp_path):
     png = encode(24, 20, image(24, 20, finger), [0, 1, 2, 3, 4])
-    (tmp_path / "point-old.png").write_bytes(b"stale")
-    paths = cursor.install({"point": png, "hover": png, "drag": b"broken"}, str(tmp_path))
-    assert set(paths) == {"point", "hover"}  # unreadable images are skipped
-    assert not (tmp_path / "point-old.png").exists()
-    w, h, px = pngutil.read_rgba(open(paths["point"], "rb").read())
+    (tmp_path / "point-0123456789ab.png").write_bytes(b"old hash-named file")
+    (tmp_path / "drag.png").write_bytes(b"from an older firmware")
+    paths, changed = cursor.install({"point": png, "hover": png, "drag": b"broken"}, str(tmp_path))
+    assert changed
+    assert paths == {"point": str(tmp_path / "point.png"), "hover": str(tmp_path / "hover.png")}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["hover.png", "point.png"]
+    w, h, px = pngutil.read_rgba((tmp_path / "point.png").read_bytes())
     assert (w, h) == cursor.CANVAS
     assert pngutil.tip(w, h, px) == cursor.HOTSPOT  # fingertip on the skin's hotspot
-    # Same image again: same file name (Kodi caches textures by path).
-    assert cursor.install({"point": png}, str(tmp_path))["point"] == paths["point"]
+    # The same images again: nothing changes, so no skin reload.
+    assert cursor.install({"point": png, "hover": png}, str(tmp_path))[1] is False
