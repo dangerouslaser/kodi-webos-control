@@ -644,7 +644,7 @@ class WebOsService:
                                        self._bridge_changed, self.mouse, self._tv_cursor,
                                        self.focus, self._tv_pointer_settings,
                                        wheel if wheel.open() else None, _receiver_ready,
-                                       self.controller.reconnect_now)
+                                       self.controller.reconnect_now, self._bridge_remote)
             await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
@@ -864,6 +864,16 @@ class WebOsService:
             window.setProperty("WebOS.RemoteBridge", state)
         else:
             window.clearProperty("WebOS.RemoteBridge")
+
+    def _bridge_remote(self, label: str) -> None:
+        """Loop thread: WebOS.Remote, the paired Magic Remote ("LG MR20"), for the settings page."""
+        if self.closing:
+            return
+        window = xbmcgui.Window(10000)
+        if label:
+            window.setProperty("WebOS.Remote", label)
+        else:
+            window.clearProperty("WebOS.Remote")
 
     def _tv_cursor(self, images: dict[str, bytes], hotspot: str) -> None:
         """Loop thread: the TV's own pointer images, for the skin's Pointer.xml.

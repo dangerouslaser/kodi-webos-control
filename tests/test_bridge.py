@@ -110,7 +110,7 @@ async def test_unmapped_button_is_logged_once(mapper, kodi_side, kodi):
     mapper.key(UNKNOWN, KEY_UP)
     mapper.key(UNKNOWN, KEY_DOWN)
     assert kodi_side.actions == []
-    assert sum("button 999 has no Kodi button" in m for _, m in kodi.logs) == 1
+    assert sum("button 999 (key 999) is the TV's" in m for _, m in kodi.logs) == 1
 
 
 async def test_wheel_scrolls(mapper, kodi_side):
@@ -1186,5 +1186,71 @@ async def test_volume_stays_with_the_tv_by_default(kodi_side):
     try:
         reader, _writer = await connect_pointer(rb)
         assert not {113, 114, 115} & set((await read_msg(reader))["consume"])
+    finally:
+        await rb.close()
+
+
+@pytest.mark.parametrize(("code", "expect"), [
+    (994, ["menu"]),      # Options (...): Kodi's context menu
+    (799, ["menu"]),      # Options on IR remotes
+    (362, ["guide"]),     # LG's Guide
+    (139, []),            # Settings: the TV's settings, not Kodi's
+    (241, []),            # Inputs
+    (1123, []),           # Home Hub
+])
+async def test_lg_buttons_route_to_kodi_or_the_tv(mapper, kodi_side, code, expect):
+    mapper.key(code, KEY_DOWN)
+    mapper.key(code, KEY_UP)
+    assert kodi_side.actions == expect
+
+
+async def test_the_tv_reports_its_remote(kodi_side):
+    labels = []
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: kodi_side.on_screen, None, Mouse(),
+                      on_remote=labels.append)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        first = await read_msg(reader)
+        assert 139 not in first["consume"] and 994 in first["consume"]  # Settings stays with the TV
+        report = {"model": "MR25GA", "name": "LGE MR25GA", "paired": True,
+                  "numeric": False, "mute": False, "cursor": True}
+        writer.write(json.dumps({"remote": report}).encode() + b"\n")
+        writer.write(json.dumps({"remote": report}).encode() + b"\n")  # the same again: nothing new
+        await writer.drain()
+        regrab = await read_msg(reader)  # what Kodi takes is sent again
+        assert regrab["consume"] == first["consume"]
+        await wait_for(lambda: labels == ["LG MR25GA"])
+        writer.close()
+        await wait_for(lambda: labels == ["LG MR25GA", ""])  # gone with the TV
+    finally:
+        await rb.close()
+
+
+def test_remote_reports_and_profiles(monkeypatch):
+    from resources.lib import remotes
+
+    cx = remotes.Remote.from_report({"model": "MR20", "paired": True})
+    assert cx.label == "LG MR20" and cx.numeric is None
+    assert remotes.Remote.from_report({"model": "", "paired": False}).label == ""
+    assert remotes.Remote.from_report("junk") == remotes.Remote()
+    assert remotes.kodi_buttons(cx) == remotes.KODI_BUTTONS
+    monkeypatch.setitem(remotes.PROFILES, "MR2", {994: None, 139: "menu"})
+    buttons = remotes.kodi_buttons(cx)
+    assert 994 not in buttons and buttons[139] == "menu"
+    assert remotes.kodi_buttons(remotes.Remote(model="MR18", paired=True)) == remotes.KODI_BUTTONS
+
+
+async def test_keys_go_to_the_tv_while_its_own_ui_is_up(kodi_side):
+    rb = RemoteBridge(BASE, kodi_side.execute, lambda: True)
+    await rb.start()
+    try:
+        reader, writer = await connect(rb)
+        await read_msg(reader)
+        for msg in ({"overlay": "quick-menu"}, {"key": 108, "value": 1}, {"key": 108, "value": 0},
+                    {"overlay": "none"}, {"key": 103, "value": 1}, {"key": 103, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: kodi_side.actions == ["up"])  # the overlay's Down never reached Kodi
     finally:
         await rb.close()

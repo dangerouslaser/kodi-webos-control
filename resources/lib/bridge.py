@@ -44,6 +44,7 @@ from typing import Any
 
 from . import bridgerepo
 from . import kodilog as log
+from .remotes import KODI_BUTTONS, KODI_HOME, Remote, button_name, kodi_buttons
 from .settings import Settings
 
 APP_ID = "com.github.dangerouslaser.kodiremote"
@@ -104,7 +105,6 @@ WHEEL_UP, WHEEL_DOWN = "wheelup", "wheeldown"
 # Home: Kodi's home screen; held, the TV's (the bridge presses Home for the
 # TV: TV_KEY + code). Only while the remote is taken over: otherwise the TV
 # gets Home anyway.
-KODI_HOME = "kodihome"
 TV_KEY = "tvkey:"
 HOME_KEYS = frozenset({102, 172, 773})  # KEY_HOME, KEY_HOMEPAGE, the Magic Remote's Home
 # Volume and mute (KEY_VOLUMEUP, KEY_VOLUMEDOWN, KEY_MUTE): normally the TV's.
@@ -115,43 +115,11 @@ RECEIVER = "receiver:"
 # A held volume button: one step this often (the TV repeats every 50 ms).
 VOLUME_REPEAT = 0.15
 
-# Linux input key codes (linux/input-event-codes.h) -> buttons of Kodi's
-# remote keymap (remote.xml, "R1"). Kodi resolves them per window, like a
-# real remote: OK selects in menus and opens the OSD in fullscreen video, and
-# user keymaps apply.
-KEY_BUTTONS: dict[int, str] = {
-    1: "back",            # KEY_ESC
-    2: "one", 3: "two", 4: "three", 5: "four", 6: "five",
-    7: "six", 8: "seven", 9: "eight", 10: "nine", 11: "zero",
-    28: "select",         # KEY_ENTER (the OK button)
-    103: "up", 105: "left", 106: "right", 108: "down",
-    119: "pause",         # KEY_PAUSE
-    128: "stop",          # KEY_STOP
-    139: "menu",          # KEY_MENU
-    158: "back",          # KEY_BACK
-    163: "skipplus",      # KEY_NEXTSONG
-    164: "play",          # KEY_PLAYPAUSE
-    165: "skipminus",     # KEY_PREVIOUSSONG
-    168: "reverse",       # KEY_REWIND
-    174: "back",          # KEY_EXIT
-    207: "play",          # KEY_PLAY
-    208: "forward",       # KEY_FASTFORWARD
-    352: "select",        # KEY_OK
-    358: "info",          # KEY_INFO
-    365: "guide",         # KEY_EPG
-    370: "subtitle",      # KEY_SUBTITLE
-    392: "language",      # KEY_AUDIO
-    398: "red", 399: "green", 400: "yellow", 401: "blue",
-    402: "channelplus",   # KEY_CHANNELUP
-    403: "channelminus",  # KEY_CHANNELDOWN
-    # LG Magic Remote (seen on a G5, webOS 10). Its wheel is REL_WHEEL
-    # ({"wheel"}); 1198/1199 are its pointer waking/idling, which the bridge
-    # keeps for the TV.
-    412: "back",          # KEY_PREVIOUS: the Back button
-    102: KODI_HOME,       # KEY_HOME
-    172: KODI_HOME,       # KEY_HOMEPAGE
-    773: KODI_HOME,       # LG Magic Remote Home (seen on a B4, webOS 9)
-}
+# Linux key code -> Kodi remote button: the shared LG table (remotes.py); the
+# bridge narrows it to the paired remote (KeyMapper.buttons). The LG Magic
+# Remote's wheel is REL_WHEEL ({"wheel"}); 1198/1199 are its pointer
+# waking/idling, which the bridge keeps for the TV.
+KEY_BUTTONS = KODI_BUTTONS
 REPEATING = frozenset({"up", "down", "left", "right"})
 # Held OK: "menu" is the context menu in lists and the OSD in fullscreen video.
 LONG_PRESS_BUTTONS = {"select": "menu", KODI_HOME: TV_KEY}
@@ -172,13 +140,14 @@ class KeyMapper:
         self._long_fired: set[int] = set()
         self._last_repeat: dict[int, float] = {}
         self._unmapped: set[int] = set()
+        self.buttons: dict[int, str] = dict(KODI_BUTTONS)  # what Kodi takes from the paired remote
 
     def key(self, code: int, value: int) -> None:
-        action = KEY_BUTTONS.get(code)
+        action = self.buttons.get(code)
         if action is None:
             if value == KEY_DOWN and code not in self._unmapped:
                 self._unmapped.add(code)
-                log.info(f"remote bridge: button {code} has no Kodi button")
+                log.info(f"remote bridge: button {code} ({button_name(code)}) is the TV's")
             return
         if value == KEY_DOWN:
             self._press(code, action)
@@ -270,10 +239,12 @@ class RemoteBridge:
                  on_tv: Callable[[dict[str, str]], None] | None = None,
                  wheel: Any = None,
                  receiver_ready: Callable[[], bool] = lambda: False,
-                 on_activity: Callable[[], None] = lambda: None) -> None:
+                 on_activity: Callable[[], None] = lambda: None,
+                 on_remote: Callable[[str], None] = lambda label: None) -> None:
         self.settings = settings
         # The TV is awake: its bridge connected or a remote key came in.
         self._on_activity = on_activity
+        self._on_remote = on_remote  # the paired remote's label ("LG MR20"), "" when unknown
         self._receiver_ready = receiver_ready  # service.denonavr is connected to a receiver that's on
         self._volume_at = 0.0
         self.mapper = KeyMapper(self._run, on_screen, lambda: self.settings.bridge_wheel_speed)
@@ -358,7 +329,7 @@ class RemoteBridge:
         return self.settings.bridge_volume_receiver and self._receiver_ready()
 
     def _consume(self) -> list[int]:
-        codes = {*KEY_BUTTONS, POINTER_CLICK}
+        codes = {*self.mapper.buttons, POINTER_CLICK}
         if self._volume_to_receiver():
             codes |= set(RECEIVER_KEYS)
         return sorted(codes)
@@ -492,8 +463,21 @@ class RemoteBridge:
             if self._clients.pop(writer, None) is not None:
                 log.info(f"remote bridge: TV at {peer} disconnected")
                 self.mapper.release_all()
+                self._on_remote("")
                 self._publish()
             writer.close()
+
+    def _remote(self, remote: Remote, info: dict[str, Any]) -> None:
+        """The TV says which Magic Remote is paired: take its buttons."""
+        if remote == info.get("remote"):
+            return
+        info["remote"] = remote
+        log.info(f"remote bridge: {remote.label or 'no Magic Remote paired'}"
+                 + (f" (number keys: {remote.numeric}, mute key: {remote.mute})"
+                    if remote.numeric is not None or remote.mute is not None else ""))
+        self.mapper.buttons = kodi_buttons(remote)
+        self._send_grab(info["writer"], info)  # what Kodi takes may have changed
+        self._on_remote(remote.label)
 
     async def _hello(self, reader: asyncio.StreamReader) -> dict[str, Any] | None:
         line = await asyncio.wait_for(reader.readline(), HELLO_TIMEOUT)
@@ -522,6 +506,8 @@ class RemoteBridge:
                 return
             log.debug(f"remote bridge: key {code} {value} (device {msg.get('dev')})")
             self._on_activity()
+            if info.get("overlay"):
+                return  # the TV's own UI is up (the bridge has handed it the remote)
             if code in RECEIVER_KEYS and RECEIVER_KEYS[code] and code in info.get("consume", ()):
                 self._receiver_key(code, value, info)
                 return
@@ -537,11 +523,21 @@ class RemoteBridge:
                 return
             if value == KEY_DOWN:
                 self._pointer_rest()  # before the button, so it reaches a focused control
-                if self._focus is not None and code in KEY_BUTTONS and self._on_screen():
+                if self._focus is not None and code in self.mapper.buttons and self._on_screen():
                     self._focus.key()
-            if value == KEY_DOWN and code in KEY_BUTTONS:
+            if value == KEY_DOWN and code in self.mapper.buttons:
                 self._hide_pointer(info)
             self.mapper.key(code, value)
+        elif "overlay" in msg:
+            state = str(msg["overlay"] or "none")
+            overlay = state not in ("none", "spinner")  # as the bridge (0.6.3) decides
+            if overlay != bool(info.get("overlay")):
+                log.info(f"remote bridge: TV UI {state}" + (": the TV has the remote" if overlay else ""))
+                if overlay:
+                    self.mapper.release_all()  # nothing held on while the TV has it
+            info["overlay"] = overlay
+        elif "remote" in msg:
+            self._remote(Remote.from_report(msg["remote"]), info)
         elif "tv" in msg:
             if isinstance(msg["tv"], dict):
                 tv = {str(k): str(v) for k, v in msg["tv"].items()}
