@@ -23,7 +23,7 @@ def main(argv: list[str]) -> None:
         if name == "find_tv":
             ui.find_tv()
         elif name == "ui" and len(args) > 1:
-            ui.run_page(args[1])
+            ui.run_page(args[1], args[2:])
         elif name == "setting":
             ui.change_setting(args[1] if len(args) > 1 else "")
         elif name == "choose_kodi_input":

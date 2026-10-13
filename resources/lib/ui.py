@@ -59,6 +59,7 @@ def pages() -> dict[str, Any]:
         "picture_preset": choose_picture_preset,
         "motion": choose_motion,
         "osd": osd_menu,
+        "osd_values": publish_osd_values,
         "volume": choose_volume,
         "remote": remote,
         "toast": send_toast,
@@ -68,8 +69,13 @@ def pages() -> dict[str, Any]:
     }
 
 
-def run_page(name: str) -> None:
-    page = pages().get(name.strip().lower())
+def run_page(name: str, args: list[str] | None = None) -> None:
+    name = name.strip().lower()
+    if name == "adjust" and args:  # the OSD panel's picture rows: RunScript(service.webostv,ui,adjust,<key>)
+        values = (_call("picture_settings") or {"result": {"values": {}}})["result"]["values"]
+        choose_adjustment(args[0].strip(), values.get(args[0].strip(), ""))
+        return
+    page = pages().get(name)
     if page is None:
         run()
     else:
@@ -164,6 +170,7 @@ def choose_picture_preset() -> None:
     index = _dialog().select(lang.get(lang.PICTURE_PRESET), labels)
     if index >= 0:
         _call("picture_preset", [values[index]])
+        publish_osd_values()  # the picture settings are per mode
 
 
 MOTION_VALUES = ("off", "cinemaClear", "natural", "smooth")
@@ -179,6 +186,7 @@ def choose_motion() -> None:
     index = _dialog().select(lang.get(lang.MOTION), labels)
     if index >= 0:
         _call("motion", [MOTION_VALUES[index]])
+        publish_osd_values()
 
 
 # Quick picks in the OSD menu, in this order after preset and motion.
@@ -209,6 +217,30 @@ def choose_adjustment(key: str, current: str = "") -> None:
     index = _dialog().select(lang.get(adjustment.label), labels, preselect=preselect)
     if index >= 0:
         _call("picture_setting", [key, values[index]])
+        publish_osd_values()
+
+
+OSD_PROPERTY = "WebOS.OSD."
+
+
+def publish_osd_values() -> None:
+    """For the skin's OSD panel (Estuary YBLOD, Custom_1126): the values the TV
+    doesn't push, as Window(Home).Property(WebOS.OSD.<key>): Motion, and each of
+    OSD_ADJUSTMENTS the TV reports for its current picture mode (labels; empty
+    clears, so the panel hides that row). The panel runs this when it opens,
+    and each pick here runs it again."""
+    window = xbmcgui.Window(10000)
+    status = ipc.call("status")
+    motion = (status.get("result") or {}).get("motion") or "" if status.get("ok") else ""
+    reply = ipc.call("picture_settings")
+    values = (reply.get("result") or {}).get("values") or {} if reply.get("ok") else {}
+    labels = {"Motion": lang.get(lang.MOTION_LABELS[motion]) if motion in lang.MOTION_LABELS else ""}
+    labels.update({key: _value_label(values[key]) if values.get(key) else "" for key in OSD_ADJUSTMENTS})
+    for key, label in labels.items():
+        if label:
+            window.setProperty(OSD_PROPERTY + key, label)
+        else:
+            window.clearProperty(OSD_PROPERTY + key)
 
 
 def osd_menu() -> None:

@@ -546,6 +546,23 @@ def test_osd_quick_pick_sets_a_picture_setting(running):
     assert xbmcgui.selects[2][1][4] == "Noise reduction: Medium"
 
 
+def test_osd_panel_values_and_adjust(running):
+    # Estuary YBLOD's OSD panel: the values it shows, and a row's own chooser.
+    _service, tv = running
+    from resources.lib import ui
+
+    home = xbmcgui.Window(10000)
+    ui.run_page("osd_values")
+    assert home.getProperty("WebOS.OSD.noiseReduction") == "Off"
+    assert home.getProperty("WebOS.OSD.backlight") == "80"
+    assert home.getProperty("WebOS.OSD.Motion") == ""  # not set since the TV last said
+    xbmcgui.select_answers.append(2)  # Medium
+    ui.run_page("adjust", ["noiseReduction"])
+    assert tv.model.picture["filmMaker"]["noiseReduction"] == "medium"
+    assert xbmcgui.selects[0][0] == "Noise reduction"
+    assert home.getProperty("WebOS.OSD.noiseReduction") == "Medium"  # the panel updates in place
+
+
 def test_player_hook_passes_video_height(running):
     service, tv = running
     xbmcaddon.settings.update({"quality_sd": "3", "rules_debounce": "0.5"})
