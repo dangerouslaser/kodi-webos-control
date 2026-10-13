@@ -195,3 +195,19 @@ async def test_guard_blocks_non_loopback_connections():
     with pytest.raises(AssertionError, match="non-loopback"):
         await session.ws_connect("wss://192.0.2.1:3001")
     await session.close()
+
+
+async def test_closed_at_hello_is_a_connection_error():
+    # A TV in standby accepts the connection and closes it at the hello; that
+    # once ended the service's connection loop (an unexpected TypeError).
+    from websockets.exceptions import ConnectionClosedOK
+
+    class Conn:
+        close_code = None
+
+        async def recv(self):
+            raise ConnectionClosedOK(None, None)
+
+    ws = aiohttp.ClientWebSocketResponse(Conn())
+    with pytest.raises(aiohttp.ClientConnectionError):
+        await ws.receive_json()

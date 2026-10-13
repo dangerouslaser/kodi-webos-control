@@ -86,6 +86,11 @@ CURSOR_MAX = 256 * 1024
 # Wheel notches in one direction this close together add up (the slower wheel
 # speeds need several per item); a longer pause starts over.
 WHEEL_GAP = 1.0
+# The virtual wheel sends one notch per event, this far apart (a frame or two):
+# Kodi takes one scroll step from each wheel event however many notches it
+# carries. (Stock Kodi's settings panes still lose notches that come mid-scroll;
+# the yblod builds patch that, kodi-9997-grouplist-wheel-destination.)
+NOTCH_GAP = 0.04
 # Holding OK this long opens the context menu instead of selecting.
 LONG_PRESS = 0.6
 # Held arrows repeat only on the TV's own repeat events (every 50 ms after
@@ -284,6 +289,7 @@ class RemoteBridge:
         # .wheel(x, y, notches) at a screen position, False if it can't
         # (uinput.VirtualWheel): scrolls what's under the pointer.
         self._wheel = wheel
+        self._notch_at = 0.0  # when the virtual wheel may send its next notch
         self._tracked_at = 0.0
         self._resting: asyncio.TimerHandle | None = None
         self._published: str | None = None
@@ -617,10 +623,31 @@ class RemoteBridge:
         if self._focus is not None and self._focus.wheel(items):
             return True  # the add-on scrolled it (the TV guide's channels)
         max_x, max_y = info["pointer"]
-        if self._wheel is None or (items and not self._wheel.wheel(shown[0] / max_x, shown[1] / max_y, items)):
+        if self._wheel is None or (items and not self._scroll(shown[0] / max_x, shown[1] / max_y, items)):
             return False
         info["shown_at"] = asyncio.get_running_loop().time()  # a wheel keeps Kodi's mouse up too
         return True
+
+    def _scroll(self, x: float, y: float, items: int) -> bool:
+        """Turn the virtual wheel `items` notches at (x, y), one event each,
+        NOTCH_GAP apart (after any still on their way). False if it failed."""
+        loop = asyncio.get_running_loop()
+        now = loop.time()
+        step = 1 if items > 0 else -1
+        at, left = max(now, self._notch_at), abs(items)
+        if at <= now:
+            if not self._wheel.wheel(x, y, step):
+                return False
+            at, left = now + NOTCH_GAP, left - 1
+        for _ in range(left):
+            loop.call_later(at - now, self._notch, x, y, step)
+            at += NOTCH_GAP
+        self._notch_at = at
+        return True
+
+    def _notch(self, x: float, y: float, step: int) -> None:
+        if self._wheel is not None:
+            self._wheel.wheel(x, y, step)
 
     def _hide_pointer(self, info: dict[str, Any]) -> None:
         """Kodi hides its mouse on a button press; keep it hidden till the remote

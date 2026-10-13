@@ -517,8 +517,10 @@ async def test_wheel_while_pointing_scrolls_under_the_pointer_and_keeps_it(kodi_
             await asyncio.sleep(0.05)
 
         await send({"pos": [960, 270]}, {"wheel": -1}, {"wheel": 2})
-        # Once the virtual wheel fails, the pointer is down and it isn't tried again.
-        assert wheel.scrolls == [(0.5, 0.25, -1), (0.5, 0.25, 2)][:2 if works else 1]
+        await asyncio.sleep(0.1)
+        # One event per notch (Kodi scrolls one step per event). Once the virtual
+        # wheel fails, the pointer is down and it isn't tried again.
+        assert wheel.scrolls == [(0.5, 0.25, -1), (0.5, 0.25, 1), (0.5, 0.25, 1)][:3 if works else 1]
         await send({"pos": [965, 272]})  # a small move right after
         if works:
             assert kodi_side.actions == []  # not the focused list

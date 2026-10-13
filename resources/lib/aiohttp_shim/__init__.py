@@ -141,8 +141,16 @@ class ClientWebSocketResponse:
         return WSMessage(WSMsgType.BINARY, data)
 
     async def receive_str(self, *, timeout: float | None = None) -> str:
-        """Receive a text message; raise TypeError for anything else."""
+        """Receive a text message; raise TypeError for anything else.
+
+        A closed connection raises ClientConnectionError instead (aiohttp
+        raises TypeError here too): a webOS TV in standby accepts the
+        connection and closes it at the hello, and that is a connection
+        failure to retry, not a bug."""
         msg = await self.receive(timeout)
+        if msg.type is WSMsgType.CLOSED:
+            error = "the TV closed the connection"
+            raise ClientConnectionError(error)
         if msg.type is not WSMsgType.TEXT:
             error = f"Received message {msg.type}:{msg.data!r} is not str"
             raise TypeError(error)
