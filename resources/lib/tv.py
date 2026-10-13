@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import dataclasses
+import traceback
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -36,6 +37,8 @@ DISCOVERY_INTERVAL = 120.0
 # client tried.
 CYCLE_TIMEOUT = 240.0
 STALL_TIMEOUT = 30.0
+# Before restarting a connection loop that stopped on an error.
+RESTART_DELAY = 5.0
 DISCONNECT_TIMEOUT = 5.0
 WATCH_INTERVAL = 5.0
 PICTURE_SETTINGS = "settings/getSystemSettings"
@@ -122,7 +125,41 @@ class TvController:
 
     async def start(self) -> None:
         self._stopping = False
+        self._start_task()
+
+    def _start_task(self) -> None:
         self._task = asyncio.create_task(self._run(), name="webostv-connection")
+        self._task.add_done_callback(self._task_done)
+
+    def _task_done(self, task: asyncio.Task) -> None:
+        """The connection loop must never stop on its own: a TV that came
+        back would go unnoticed until Kodi restarts. Log why and restart it."""
+        if self._stopping or task is not self._task:
+            return
+        err = None if task.cancelled() else task.exception()
+        log.error("connection loop stopped: " + ("".join(traceback.format_exception(err)).strip()
+                                                 if err else "cancelled" if task.cancelled() else "returned"))
+        self._backoff.reset()
+        asyncio.get_running_loop().call_later(RESTART_DELAY, self._restart_task)
+
+    def _restart_task(self) -> None:
+        if not self._stopping and (self._task is None or self._task.done()):
+            log.info("restarting the connection loop")
+            self._start_task()
+
+    def reconnect_now(self) -> None:
+        """Loop thread: the TV shows signs of life (its Remote Bridge connected,
+        a remote key came in): if we aren't connected, try at once instead of
+        waiting out the retry delay."""
+        if self._stopping or self.pairing_blocked or self.connected:
+            return
+        if self._task is None or self._task.done():
+            self._restart_task()
+            return
+        if not self._wake.is_set():
+            log.debug("TV is awake; reconnecting now")
+            self._backoff.reset()
+            self._wake.set()
 
     async def stop(self) -> None:
         self._stopping = True
@@ -170,6 +207,12 @@ class TvController:
                     connected = await self._connect_cycle()
             except TimeoutError:
                 self._abandon_client("connecting to the TV stalled")
+                connected = False
+            except asyncio.CancelledError:
+                raise
+            except Exception as err:  # noqa: BLE001 - keep retrying whatever went wrong
+                log.error("connecting to the TV failed: " + "".join(traceback.format_exception(err)).strip())
+                self._abandon_client("connect failed unexpectedly")
                 connected = False
             if connected:
                 self._backoff.reset()

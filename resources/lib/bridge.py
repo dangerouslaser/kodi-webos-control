@@ -102,6 +102,13 @@ WHEEL_UP, WHEEL_DOWN = "wheelup", "wheeldown"
 KODI_HOME = "kodihome"
 TV_KEY = "tvkey:"
 HOME_KEYS = frozenset({102, 172, 773})  # KEY_HOME, KEY_HOMEPAGE, the Magic Remote's Home
+# Volume and mute (KEY_VOLUMEUP, KEY_VOLUMEDOWN, KEY_MUTE): normally the TV's.
+# With "Volume buttons control the receiver" (and service.denonavr up), Kodi
+# takes them while it's on screen and the receiver gets them (RECEIVER + name).
+RECEIVER_KEYS = {115: "volume_up", 114: "volume_down", 113: "mute"}
+RECEIVER = "receiver:"
+# A held volume button: one step this often (the TV repeats every 50 ms).
+VOLUME_REPEAT = 0.15
 
 # Linux input key codes (linux/input-event-codes.h) -> buttons of Kodi's
 # remote keymap (remote.xml, "R1"). Kodi resolves them per window, like a
@@ -256,8 +263,14 @@ class RemoteBridge:
                  on_cursor: Callable[[dict[str, bytes], str], None] | None = None,
                  focus: Any = None,
                  on_tv: Callable[[dict[str, str]], None] | None = None,
-                 wheel: Any = None) -> None:
+                 wheel: Any = None,
+                 receiver_ready: Callable[[], bool] = lambda: False,
+                 on_activity: Callable[[], None] = lambda: None) -> None:
         self.settings = settings
+        # The TV is awake: its bridge connected or a remote key came in.
+        self._on_activity = on_activity
+        self._receiver_ready = receiver_ready  # service.denonavr is connected to a receiver that's on
+        self._volume_at = 0.0
         self.mapper = KeyMapper(self._run, on_screen, lambda: self.settings.bridge_wheel_speed)
         self._execute = execute
         self._on_screen = on_screen
@@ -329,16 +342,25 @@ class RemoteBridge:
     def refresh(self) -> None:
         """TV state changed: take the remote over or hand it back right away."""
         for writer, info in self._clients.items():
-            if info.get("grab") != self._grab_wanted():
+            if info.get("grab") != self._grab_wanted() or info.get("consume") != self._consume():
                 self._send_grab(writer, info)
 
     def _grab_wanted(self) -> bool:
-        return self.settings.bridge_pointer and self._on_screen()
+        return (self.settings.bridge_pointer or self._volume_to_receiver()) and self._on_screen()
+
+    def _volume_to_receiver(self) -> bool:
+        return self.settings.bridge_volume_receiver and self._receiver_ready()
+
+    def _consume(self) -> list[int]:
+        codes = {*KEY_BUTTONS, POINTER_CLICK}
+        if self._volume_to_receiver():
+            codes |= set(RECEIVER_KEYS)
+        return sorted(codes)
 
     def _send_grab(self, writer: asyncio.StreamWriter, info: dict[str, Any]) -> None:
         grab = self._grab_wanted()
         info["grab"] = grab
-        consume = sorted({*KEY_BUTTONS, POINTER_CLICK})
+        consume = info["consume"] = self._consume()
         msg = {"grab": grab, "consume": consume, "pointer": self.settings.bridge_pointer}
         with contextlib.suppress(OSError, RuntimeError):
             writer.write(json.dumps(msg).encode() + b"\n")
@@ -449,6 +471,7 @@ class RemoteBridge:
             self._clients[writer] = info
             self._send_grab(writer, info)
             self._publish()
+            self._on_activity()
             log.info(f"remote bridge: TV at {peer} connected (bridge {hello.get('version', '?')}, "
                      f"{_runtime(hello)}, devices {hello.get('devices', [])})")
             while True:
@@ -492,6 +515,10 @@ class RemoteBridge:
             except (TypeError, ValueError):
                 return
             log.debug(f"remote bridge: key {code} {value} (device {msg.get('dev')})")
+            self._on_activity()
+            if code in RECEIVER_KEYS and RECEIVER_KEYS[code] and code in info.get("consume", ()):
+                self._receiver_key(code, value, info)
+                return
             if code in HOME_KEYS and not info.get("grab"):
                 return  # the TV has it (and shows its home)
             if code in OK_KEYS and self._pointer_visible(info):
@@ -568,6 +595,16 @@ class RemoteBridge:
                     self._focus.key()
                 self.mapper.wheel(int(msg["wheel"]))
 
+
+    def _receiver_key(self, code: int, value: int, info: dict[str, Any]) -> None:
+        """A volume or mute button we took from the TV: to the receiver. Held
+        volume steps at VOLUME_REPEAT; mute doesn't repeat. The pointer stays."""
+        if not info.get("grab") or not self._on_screen():
+            return
+        now = asyncio.get_running_loop().time()
+        if value == KEY_DOWN or (value == KEY_REPEAT and code != 113 and now - self._volume_at >= VOLUME_REPEAT):
+            self._volume_at = now
+            self._execute(RECEIVER + RECEIVER_KEYS[code])
 
     def _wheel_at_pointer(self, info: dict[str, Any], steps: int) -> bool:
         """Pointing: scroll what's under the pointer, like a mouse wheel, and

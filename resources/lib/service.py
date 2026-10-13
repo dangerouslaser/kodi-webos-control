@@ -48,6 +48,7 @@ PAD_ROW = "WebOS.PadRow"
 SETTINGS_PAD = 9101
 PAD_TOP, PAD_ROW_HEIGHT = 130, 85
 LGTV_WINDOW, LGTV_FIRST_CATEGORY = 1120, 21
+DENON_WINDOW = 1121  # Estuary YBLOD's Denon page: laid out like the LG TV page
 # The TV guide's channel group selector (MyPVRGuide.xml, fixedlist 11, which
 # slides along as its items get focus), and the skin's pad over it: its left
 # edge and item width. PAD_ROW then holds the slot (column) under the pointer.
@@ -336,7 +337,7 @@ class FocusKeeper:
                 xbmc.executebuiltin(f"SetFocus({GUIDE_GROUPS},{first + slot - 1},absolute)")
             return
         first = LGTV_FIRST_CATEGORY if xbmc.getCondVisibility(
-            f"Window.IsActive({LGTV_WINDOW})") else KODI_FIRST_CATEGORY
+            f"Window.IsActive({LGTV_WINDOW}) | Window.IsActive({DENON_WINDOW})") else KODI_FIRST_CATEGORY
         xbmc.executebuiltin(f"SetFocus({first + slot})")
 
     def _pad_slot(self) -> int | None:
@@ -450,6 +451,12 @@ def _pointer_context() -> str:
     if not xbmc.getInfoLabel("Window(Home).Property(WebOS.PointerContext)"):
         return ""
     return xbmc.getInfoLabel("$VAR[WebOSPointerContext]")
+
+
+def _receiver_ready() -> bool:
+    """service.denonavr is following a receiver that's on (loop thread)."""
+    return xbmc.getCondVisibility("String.IsEqual(Window(Home).Property(Denon.Connected),true)"
+                                  " + String.IsEqual(Window(Home).Property(Denon.Power),true)")
 
 
 def _wheel_moves_focus() -> bool:
@@ -636,7 +643,8 @@ class WebOsService:
             self.bridge = RemoteBridge(self.settings, self._remote_button, self._kodi_on_screen,
                                        self._bridge_changed, self.mouse, self._tv_cursor,
                                        self.focus, self._tv_pointer_settings,
-                                       wheel if wheel.open() else None)
+                                       wheel if wheel.open() else None, _receiver_ready,
+                                       self.controller.reconnect_now)
             await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
@@ -892,6 +900,13 @@ class WebOsService:
 
     def _remote_button(self, name: str) -> None:
         """Loop thread: a Remote Bridge button; the wheel scrolls what has focus."""
+        from .bridge import RECEIVER  # noqa: PLC0415
+
+        if name.startswith(RECEIVER):  # a volume button for service.denonavr
+            xbmc.executeJSONRPC(json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "JSONRPC.NotifyAll",
+                "params": {"sender": "service.denonavr", "message": name[len(RECEIVER):]}}))
+            return
         if name == "kodihome":  # the remote's Home (held: the TV's home)
             xbmc.executebuiltin("ActivateWindow(home)")
             return

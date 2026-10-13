@@ -406,3 +406,68 @@ async def test_stalled_connect_is_abandoned_and_retried(tv, monkeypatch):
         assert any("stalled" in m and "connect_handler" in m for _, m in xbmc.logs)
     finally:
         await controller.stop()
+
+
+async def test_unexpected_connect_error_is_logged_and_retried(tv, monkeypatch):
+    # A TV waking up left the service disconnected all night: an error the
+    # connect loop didn't expect ended it silently.
+    from aiowebostv import webos_client
+
+    real_hello = webos_client.WebOsClient._get_hello_info
+    calls = []
+
+    async def hello(self, ws):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError("TV half awake")
+        return await real_hello(self, ws)
+
+    monkeypatch.setattr(webos_client.WebOsClient, "_get_hello_info", hello)
+    controller, _ = make_controller()
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected, timeout=5)
+        assert any("TV half awake" in m for _, m in xbmc.logs)
+    finally:
+        await controller.stop()
+
+
+async def test_dead_connection_loop_is_restarted(tv, monkeypatch):
+    from resources.lib import tv as tv_module
+
+    monkeypatch.setattr(tv_module, "RESTART_DELAY", 0.05)
+    controller, _ = make_controller()
+    real = controller._connect_cycle
+    calls = []
+
+    async def cycle():
+        calls.append(1)
+        if len(calls) == 1:
+            raise asyncio.CancelledError  # ends the loop task
+        return await real()
+
+    controller._connect_cycle = cycle
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected, timeout=5)
+    finally:
+        await controller.stop()
+
+
+async def test_reconnect_now_skips_the_retry_wait(patch_ports):
+    tv = FakeTv()
+    await tv.start()
+    patch_ports(tv)
+    await tv.stop()  # the TV is off
+    controller, _ = make_controller(backoff_base=60.0)
+    await controller.start()
+    try:
+        await asyncio.sleep(0.3)  # failed once; now waiting 60 s
+        assert not controller.connected
+        await tv.start()  # the TV wakes up (on new ports)
+        patch_ports(tv)
+        controller.reconnect_now()  # its Remote Bridge connects
+        await wait_for(lambda: controller.connected, timeout=5)
+    finally:
+        await controller.stop()
+        await tv.stop()

@@ -842,3 +842,11 @@ msgstr ""
 msgctxt "#32643"
 msgid "Very high"
 msgstr ""
+
+msgctxt "#32635"
+msgid "Volume buttons control the receiver"
+msgstr ""
+
+msgctxt "#32685"
+msgid "While Kodi is on screen, the TV remote's volume and mute buttons go to the audio receiver (service.denonavr) instead of the TV, with no HDMI-CEC. Elsewhere on the TV they work as before. Needs the Remote Bridge."
+msgstr ""

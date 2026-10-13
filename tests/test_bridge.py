@@ -1061,7 +1061,7 @@ async def test_settings_side_menu_switches_on_click_not_hover(kodi):
     keeper.track(200, 130 + 4 * 85 + 10)
     keeper.click()
     assert kodi.builtins == ["SetFocus(-196)"]  # Kodi's fifth category button
-    kodi.conditions["Window.IsActive(1120)"] = True
+    kodi.conditions["Window.IsActive(1120) | Window.IsActive(1121)"] = True
     keeper.click()
     assert kodi.builtins[-1] == "SetFocus(25)"   # the LG TV page's own buttons
     keeper.key()                               # buttons: back to the list
@@ -1141,5 +1141,48 @@ async def test_an_older_tv_app_is_reported_as_outdated(kodi_side, monkeypatch):
         assert rb.status()["remote_bridge_outdated"] is True
         assert rb.status()["remote_bridge_bundled"] == "0.5.0"
         assert states[-1] == "outdated"
+    finally:
+        await rb.close()
+
+
+async def test_volume_buttons_go_to_the_receiver_when_asked(kodi_side, monkeypatch):
+    monkeypatch.setattr(bridge, "VOLUME_REPEAT", 0.05)
+    ready = {"receiver": True}
+    settings = dataclasses.replace(POINTER, bridge_volume_receiver=True)
+    rb = RemoteBridge(settings, kodi_side.execute, lambda: True, None, Mouse(),
+                      receiver_ready=lambda: ready["receiver"])
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        grab = await read_msg(reader)
+        assert {113, 114, 115} <= set(grab["consume"])     # taken from the TV
+
+        async def send(*msgs, pause=0.0):
+            for msg in msgs:
+                writer.write(json.dumps(msg).encode() + b"\n")
+                await writer.drain()
+                await asyncio.sleep(pause)
+            await asyncio.sleep(0.05)
+
+        await send({"key": 115, "value": 1}, {"key": 115, "value": 2}, {"key": 115, "value": 2},
+                   {"key": 115, "value": 0})               # a short hold: repeats are spaced
+        assert kodi_side.actions == ["receiver:volume_up"]
+        await send({"key": 115, "value": 1}, {"key": 115, "value": 2}, pause=0.06)
+        assert kodi_side.actions[-1] == "receiver:volume_up" and len(kodi_side.actions) == 3
+        await send({"key": 113, "value": 1}, {"key": 113, "value": 2}, {"key": 113, "value": 0})
+        assert kodi_side.actions[-1] == "receiver:mute" and len(kodi_side.actions) == 4  # no repeat
+        ready["receiver"] = False                           # receiver off: the TV's again
+        rb.refresh()
+        assert not {113, 114, 115} & set((await read_msg(reader))["consume"])
+    finally:
+        await rb.close()
+
+
+async def test_volume_stays_with_the_tv_by_default(kodi_side):
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(), receiver_ready=lambda: True)
+    await rb.start()
+    try:
+        reader, _writer = await connect_pointer(rb)
+        assert not {113, 114, 115} & set((await read_msg(reader))["consume"])
     finally:
         await rb.close()

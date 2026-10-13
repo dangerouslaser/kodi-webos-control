@@ -112,6 +112,7 @@ class Settings:
     bridge_pointer: bool = False
     bridge_pointer_wake: int = 300
     bridge_pointer_return: bool = True
+    bridge_volume_receiver: bool = False
     bridge_wheel_speed: float = 1.0
     # The TV's pointer settings as (webOS key, value) pairs (see TV_POINTER).
     tv_pointer: tuple[tuple[str, str], ...] = ()
@@ -166,6 +167,7 @@ class Settings:
             bridge_pointer=addon.getSettingBool("bridge_pointer"),
             bridge_pointer_wake=_wake(addon),
             bridge_pointer_return=addon.getSettingBool("bridge_pointer_return"),
+            bridge_volume_receiver=addon.getSettingBool("bridge_volume_receiver"),
             bridge_wheel_speed=_wheel_speed(addon),
             tv_pointer=_tv_pointer(addon),
             motion_film=_option(addon, "motion_film", MOTION_MODES),

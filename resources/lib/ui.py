@@ -313,7 +313,7 @@ def choose_volume() -> None:
 # Settings a skin page may change: bools toggle, options open a picker.
 EDITABLE_BOOLS = {
     "rules_enabled", "restore_on_stop", "resume_on_return", "transparent_control", "remote_bridge",
-    "bridge_pointer", "bridge_pointer_return", "tv_pointer_align", "tv_pointer_autohide",
+    "bridge_pointer", "bridge_pointer_return", "bridge_volume_receiver", "tv_pointer_align", "tv_pointer_autohide",
     "toast_on_connect", "auto_discover", "loopback_fallback", "debug",
 }
 EDITABLE_OPTIONS = {
