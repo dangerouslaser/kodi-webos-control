@@ -268,6 +268,10 @@ class FakeTv:
         if key and key in self.valid_keys:
             await conn.send(json.dumps({"type": "registered", "id": uid, "payload": {"client-key": key}}))
             return
+        if self.pairing == "refuse":
+            # As a B4 (webOS 9) did after a few re-pairs: no prompt at all.
+            await conn.send(json.dumps({"type": "error", "id": uid, "error": "403 [object Object]", "payload": {}}))
+            return
         # Unknown or missing key: real TVs show the PROMPT dialog again.
         self.prompts += 1
         await conn.send(json.dumps({"type": "response", "id": uid, "payload": {"pairingType": "PROMPT", "returnValue": True}}))

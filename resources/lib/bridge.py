@@ -240,11 +240,15 @@ class RemoteBridge:
                  wheel: Any = None,
                  receiver_ready: Callable[[], bool] = lambda: False,
                  on_activity: Callable[[], None] = lambda: None,
-                 on_remote: Callable[[str], None] = lambda label: None) -> None:
+                 on_remote: Callable[[str], None] = lambda label: None,
+                 on_kodi_button: Callable[[int], None] = lambda code: None) -> None:
         self.settings = settings
         # The TV is awake: its bridge connected or a remote key came in.
         self._on_activity = on_activity
         self._on_remote = on_remote  # the paired remote's label ("LG MR20"), "" when unknown
+        # An app button set to bring back Kodi (settings.kodi_buttons) was pressed
+        # while Kodi wasn't on screen.
+        self._on_kodi_button = on_kodi_button
         self._receiver_ready = receiver_ready  # service.denonavr is connected to a receiver that's on
         self._volume_at = 0.0
         self.mapper = KeyMapper(self._run, on_screen, lambda: self.settings.bridge_wheel_speed)
@@ -329,7 +333,9 @@ class RemoteBridge:
         return self.settings.bridge_volume_receiver and self._receiver_ready()
 
     def _consume(self) -> list[int]:
-        codes = {*self.mapper.buttons, POINTER_CLICK}
+        # The app buttons that bring back Kodi too: on screen, they're no-ops
+        # rather than leaving Kodi for the app.
+        codes = {*self.mapper.buttons, POINTER_CLICK, *self.settings.kodi_buttons}
         if self._volume_to_receiver():
             codes |= set(RECEIVER_KEYS)
         return sorted(codes)
@@ -508,6 +514,11 @@ class RemoteBridge:
             self._on_activity()
             if info.get("overlay"):
                 return  # the TV's own UI is up (the bridge has handed it the remote)
+            if code in self.settings.kodi_buttons:
+                if value == KEY_DOWN and not self._on_screen():
+                    log.info(f"remote bridge: {button_name(code)} brings back Kodi")
+                    self._on_kodi_button(code)
+                return
             if code in RECEIVER_KEYS and RECEIVER_KEYS[code] and code in info.get("consume", ()):
                 self._receiver_key(code, value, info)
                 return

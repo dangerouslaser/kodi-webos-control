@@ -351,7 +351,9 @@ def change_setting(key: str) -> None:
     """RunScript(service.webostv,setting,<id>): toggle or pick a value."""
     key = key.strip()
     addon = xbmcaddon.Addon("service.webostv")
-    if key in EDITABLE_BOOLS:
+    if key == "kodi_buttons":
+        _pick_kodi_buttons(addon)
+    elif key in EDITABLE_BOOLS:
         addon.setSetting(key, "false" if addon.getSettingBool(key) else "true")
     elif key in EDITABLE_OPTIONS:
         labels = [addon.getLocalizedString(i) or str(i) for i in EDITABLE_OPTIONS[key]]
@@ -364,6 +366,19 @@ def change_setting(key: str) -> None:
                                  preselect=current)
         if index >= 0:
             addon.setSetting(key, str(index))
+
+
+def _pick_kodi_buttons(addon: xbmcaddon.Addon) -> None:
+    """The remote's app buttons that bring back Kodi: pick any number."""
+    from .remotes import APP_BUTTONS, button_name  # noqa: PLC0415
+    from .settings import _codes  # noqa: PLC0415
+
+    chosen = _codes(addon.getSetting("kodi_buttons"))
+    names = [button_name(code) for code in APP_BUTTONS]
+    picked = _dialog().multiselect(addon.getLocalizedString(32694) or "kodi_buttons", names,
+                                   preselect=[i for i, code in enumerate(APP_BUTTONS) if code in chosen])
+    if picked is not None:
+        addon.setSetting("kodi_buttons", ",".join(str(APP_BUTTONS[i]) for i in sorted(picked)))
 
 
 def remote() -> None:

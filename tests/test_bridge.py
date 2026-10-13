@@ -1063,7 +1063,7 @@ async def test_settings_side_menu_switches_on_click_not_hover(kodi):
     keeper.track(200, 130 + 4 * 85 + 10)
     keeper.click()
     assert kodi.builtins == ["SetFocus(-196)"]  # Kodi's fifth category button
-    kodi.conditions["Window.IsActive(1120) | Window.IsActive(1121)"] = True
+    kodi.conditions["Window.IsActive(1120) | Window.IsActive(1121) | Window.IsActive(1123)"] = True
     keeper.click()
     assert kodi.builtins[-1] == "SetFocus(25)"   # the LG TV page's own buttons
     keeper.key()                               # buttons: back to the list
@@ -1254,3 +1254,78 @@ async def test_keys_go_to_the_tv_while_its_own_ui_is_up(kodi_side):
         await wait_for(lambda: kodi_side.actions == ["up"])  # the overlay's Down never reached Kodi
     finally:
         await rb.close()
+
+
+async def test_app_buttons_that_bring_back_kodi(kodi_side):
+    pressed = []
+    settings = dataclasses.replace(BASE, kodi_buttons=frozenset({1037}))
+    rb = RemoteBridge(settings, kodi_side.execute, lambda: kodi_side.on_screen,
+                      on_kodi_button=pressed.append)
+    await rb.start()
+    try:
+        reader, writer = await connect(rb)
+        await read_msg(reader)
+        kodi_side.on_screen = True
+        for msg in ({"key": 1037, "value": 1}, {"key": 1037, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await asyncio.sleep(0.1)
+        assert pressed == [] and kodi_side.actions == []  # in Kodi: nothing, and not the app
+        assert 1037 in rb._consume()
+        kodi_side.on_screen = False
+        for msg in ({"key": 1037, "value": 1}, {"key": 1037, "value": 0}, {"key": 1038, "value": 1}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+        await writer.drain()
+        await wait_for(lambda: pressed == [1037])  # Prime Video isn't one: the TV's
+        assert kodi_side.actions == []
+    finally:
+        await rb.close()
+
+
+def test_kodi_buttons_setting_parses():
+    from resources.lib.settings import _codes
+
+    assert _codes("1037, 1038,,x,1095") == frozenset({1037, 1038, 1095})
+    assert _codes("") == frozenset()
+
+
+async def test_switching_back_to_kodi_retries_while_the_app_has_the_screen(monkeypatch):
+    from types import SimpleNamespace
+
+    from resources.lib import service as service_mod
+    from resources.lib.settings import Settings
+    from resources.lib.state import TvState
+
+    monkeypatch.setattr(service_mod, "KODI_BACK_RETRIES", (0.0, 0.01, 0.01, 0.01))
+    switched = []
+
+    class Controller:
+        connected = True
+        state = TvState(connected=True, is_on=True, app_id="netflix")
+
+        async def set_input(self, query):
+            switched.append(query)
+            if len(switched) == 2:  # the second switch sticks
+                Controller.state = TvState(connected=True, is_on=True, app_id="com.webos.app.hdmi2")
+            return query
+
+    fake = SimpleNamespace(controller=Controller(), settings=Settings(kodi_input="com.webos.app.hdmi2"))
+    await service_mod.WebOsService._switch_to_kodi(fake)
+    assert switched == ["com.webos.app.hdmi2"] * 2
+
+
+@pytest.mark.parametrize(("sonos", "denon", "chose_sonos", "target"), [
+    (True, False, False, "service.sonos"),
+    (False, True, False, "service.denonavr"),
+    (True, True, False, "service.denonavr"),  # both: the skin's setup choice decides
+    (True, True, True, "service.sonos"),
+    (False, False, False, None),
+])
+def test_volume_buttons_go_to_sonos_or_denon(kodi, sonos, denon, chose_sonos, target):
+    from resources.lib.service import _receiver_target
+
+    kodi.conditions["String.IsEqual(Window(Home).Property(Sonos.Connected),true)"] = sonos
+    kodi.conditions["String.IsEqual(Window(Home).Property(Denon.Connected),true)"
+                    " + String.IsEqual(Window(Home).Property(Denon.Power),true)"] = denon
+    kodi.conditions["Skin.HasSetting(setup_receiver_sonos)"] = chose_sonos
+    assert _receiver_target() == target

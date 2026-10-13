@@ -42,7 +42,19 @@ LG_BUTTONS: dict[int, str] = {
     370: "Subtitles", 392: "Audio",
     1037: "Netflix", 1038: "Prime Video", 1042: "Disney+", 1043: "LG Channels",
     1044: "Rakuten TV", 1086: "Alexa", 1107: "Sling", 1111: "Stan", 1117: "Google Assistant",
+    1039: "ivi", 1041: "Hotstar", 1045: "Globoplay", 1047: "Okko", 1088: "Kinopoisk", 1089: "Watcha",
+    1090: "U-NEXT", 1091: "FPT Play", 1092: "Shahid", 1095: "Hulu", 1096: "NHK+", 1097: "TOD",
+    1099: "Freeview Play", 1102: "Sony LIV", 1108: "TVer", 1109: "Wavve", 1110: "Coupang Play",
+    1120: "TV360", 1121: "VTVgo", 1125: "VK Video", 1126: "Premier",
 }
+
+# The remote's app buttons (each opens a streaming app; models carry a few,
+# by region), in the order the settings list shows them. Any of them can be
+# set to bring back Kodi instead (settings.kodi_buttons).
+APP_BUTTONS: tuple[int, ...] = (
+    1037, 1038, 1042, 1095, 1043, 1044, 1107, 1111, 1099, 1102, 1041, 1092, 1039, 1045, 1047, 1088,
+    1089, 1090, 1091, 1096, 1097, 1108, 1109, 1110, 1120, 1121, 1125, 1126,
+)
 
 # Linux key code -> button of Kodi's remote keymap (remote.xml, "R1"). Kodi
 # resolves them per window, like a real remote: OK selects in menus and opens

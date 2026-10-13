@@ -471,3 +471,42 @@ async def test_reconnect_now_skips_the_retry_wait(patch_ports):
     finally:
         await controller.stop()
         await tv.stop()
+
+
+@pytest.mark.parametrize("answer", ["refuse", "reject", "ignore"])
+async def test_repair_the_tv_refuses_keeps_the_current_pairing(tv, monkeypatch, answer):
+    # A B4 refused every new pairing after a few re-pairs; each re-pair had
+    # deleted the working key, leaving the add-on unable to connect at all.
+    from resources.lib import tv as tv_module
+
+    from aiowebostv import webos_client
+
+    monkeypatch.setattr(tv_module, "CYCLE_TIMEOUT", 3.0)
+    monkeypatch.setattr(webos_client, "RECEIVE_TIMEOUT", 1.0)  # an unanswered prompt
+    controller, notes = make_controller(Settings(host="127.0.0.1", loopback_fallback=False, connect_timeout=1))
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.connected)
+        key = KeyStore().get("127.0.0.1")
+        tv.pairing = answer
+        await controller.repair()
+        await wait_for(lambda: any("keeping the current pairing" in m for _, m in notes), timeout=10)
+        await wait_for(lambda: controller.connected, timeout=10)  # back with the old key
+        assert KeyStore().get("127.0.0.1") == key
+        assert not controller.pairing_blocked
+    finally:
+        await controller.stop()
+
+
+async def test_pairing_refused_without_a_key_blocks(patch_ports):
+    tv = FakeTv(pairing="refuse")
+    await tv.start()
+    patch_ports(tv)
+    controller, notes = make_controller()
+    await controller.start()
+    try:
+        await wait_for(lambda: controller.pairing_blocked)
+        assert any("declined" in m for _, m in notes)
+    finally:
+        await controller.stop()
+        await tv.stop()

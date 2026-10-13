@@ -53,6 +53,11 @@ def _option(addon: xbmcaddon.Addon, key: str, options: tuple[str, ...]) -> str:
     return options[index] if 0 <= index < len(options) else options[0]
 
 
+def _codes(text: str) -> frozenset[int]:
+    """"1037,1038" -> {1037, 1038}; anything else is skipped."""
+    return frozenset(int(part) for part in text.replace(" ", "").split(",") if part.isdigit())
+
+
 def _wake(addon: xbmcaddon.Addon) -> int:
     try:
         index = int(addon.getSetting("bridge_pointer_wake") or 1)
@@ -125,6 +130,8 @@ class Settings:
     bridge_pointer_wake: int = 300
     bridge_pointer_return: bool = True
     bridge_volume_receiver: bool = False
+    # Remote app buttons (remotes.APP_BUTTONS) that bring back Kodi, from anywhere on the TV.
+    kodi_buttons: frozenset[int] = frozenset()
     bridge_wheel_speed: float = 1.0
     # The TV's pointer settings as (webOS key, value) pairs (see TV_POINTER).
     tv_pointer: tuple[tuple[str, str], ...] = ()
@@ -184,6 +191,7 @@ class Settings:
             bridge_pointer_wake=_wake(addon),
             bridge_pointer_return=addon.getSettingBool("bridge_pointer_return"),
             bridge_volume_receiver=addon.getSettingBool("bridge_volume_receiver"),
+            kodi_buttons=_codes(addon.getSetting("kodi_buttons")),
             bridge_wheel_speed=_wheel_speed(addon),
             tv_pointer=_tv_pointer(addon),
             motion_film=_option(addon, "motion_film", MOTION_MODES),

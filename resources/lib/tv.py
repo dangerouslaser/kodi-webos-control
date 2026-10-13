@@ -101,6 +101,9 @@ class TvController:
         self._task: asyncio.Task | None = None
         self._failure_notified = False
         self._had_key = False
+        # Re-pair asked for: pair without the stored key, which is kept (and
+        # used again) until a new pairing succeeds.
+        self._repairing = False
         self._expected_uuid: str | None = None
         self._firmware: tuple[WebOsClient, str] | None = None
         self.picture_preset = ""
@@ -188,9 +191,11 @@ class TvController:
             self._wake.set()
 
     async def repair(self) -> None:
-        """Forget the stored key and reconnect (shows the TV prompt once)."""
-        log.info("re-pair requested; deleting stored client key")
-        self._forget_key()
+        """Pair again (the TV shows its prompt). The stored key stays until the
+        new pairing succeeds: a TV that refuses or a prompt left unanswered
+        leaves the add-on as it was, never without a key."""
+        log.info("re-pair requested; pairing again (keeping the current pairing until the TV accepts)")
+        self._repairing = True
         self.pairing_blocked = False
         self._failure_notified = False
         await self._disconnect_client()
@@ -265,7 +270,8 @@ class TvController:
                 raise
             except CONNECTION_ERRORS as err:
                 if self._pairing_timed_out():
-                    self._block_pairing("Pairing timed out on the TV")
+                    if not self._repair_failed("the pairing prompt timed out"):
+                        self._block_pairing("Pairing timed out on the TV")
                     return False
                 log.debug(f"connect to {host} failed: {err!r}")
                 if index == 0 and not self._failure_notified:
@@ -289,9 +295,9 @@ class TvController:
         # A key follows the TV's UUID, so a TV picked with Find TV or found
         # at a new IP reuses its pairing instead of prompting again.
         self._expected_uuid = uuid or discovery.hinted_uuid(host)
-        key = self.keystore.get(self.settings.host) or (
-            self.keystore.get_uuid(self._expected_uuid) if self._expected_uuid else None
-        )
+        key = self._stored_key()
+        if self._repairing:
+            key = None  # pair afresh; the stored key stays for a fallback
         self._had_key = key is not None
         self.active_host = host
         client = self._client_factory(
@@ -317,6 +323,7 @@ class TvController:
         if tv_uuid:
             storage.write_json(IDENTITY_FILE, {"host": self.settings.host, "uuid": tv_uuid})
         self._failure_notified = False
+        self._repairing = False
         log.info(f"connected to {host}")
         self._learn_mac(client)
         await self._subscribe_picture(client)
@@ -436,7 +443,29 @@ class TvController:
             log.warning(f"could not save host setting: {err!r}")
         self._publish()
 
+    def _stored_key(self) -> str | None:
+        return self.keystore.get(self.settings.host) or (
+            self.keystore.get_uuid(self._expected_uuid) if self._expected_uuid else None
+        )
+
+    def _repair_failed(self, reason: str) -> bool:
+        """A re-pair that didn't pair: back to the stored key, if there is one
+        (True), reconnecting at once."""
+        if not self._repairing:
+            return False
+        self._repairing = False
+        if self._stored_key() is None:
+            return False
+        message = f"The TV didn't pair again ({reason}); keeping the current pairing"
+        log.warning(message)
+        self._notify("info", message)
+        self._backoff.reset()
+        self._wake.set()
+        return True
+
     def _handle_pair_error(self, err: WebOsTvPairError) -> None:
+        if self._repair_failed(str(err)):
+            return
         if self._had_key:
             self._forget_key()
             self._block_pairing("Stored pairing key was rejected; use Re-pair")

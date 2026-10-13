@@ -49,6 +49,7 @@ SETTINGS_PAD = 9101
 PAD_TOP, PAD_ROW_HEIGHT = 130, 85
 LGTV_WINDOW, LGTV_FIRST_CATEGORY = 1120, 21
 DENON_WINDOW = 1121  # Estuary YBLOD's Denon page: laid out like the LG TV page
+SONOS_WINDOW = 1123  # ... and its Sonos page
 # The TV guide's channel group selector (MyPVRGuide.xml, fixedlist 11, which
 # slides along as its items get focus), and the skin's pad over it: its left
 # edge and item width. PAD_ROW then holds the slot (column) under the pointer.
@@ -68,6 +69,10 @@ WHEEL = {"wheelup": ("leftanalogtrigger", "up", "left"),
 # Kodi's lists move one item once the squared analog amount passes 0.4; the
 # trigger arrives in 1/255 steps, and 162/255 squared is just over it.
 SCROLL_AMOUNT = 162.4 / 255
+# An app button set to bring back Kodi: switch to Kodi at once, then again
+# after each of these pauses while the TV still shows something else (the
+# app the button started can take the screen as it finishes loading).
+KODI_BACK_RETRIES = (0.0, 1.5, 3.0, 5.0)
 
 
 class _Monitor(xbmc.Monitor):
@@ -337,7 +342,7 @@ class FocusKeeper:
                 xbmc.executebuiltin(f"SetFocus({GUIDE_GROUPS},{first + slot - 1},absolute)")
             return
         first = LGTV_FIRST_CATEGORY if xbmc.getCondVisibility(
-            f"Window.IsActive({LGTV_WINDOW}) | Window.IsActive({DENON_WINDOW})") else KODI_FIRST_CATEGORY
+            f"Window.IsActive({LGTV_WINDOW}) | Window.IsActive({DENON_WINDOW}) | Window.IsActive({SONOS_WINDOW})") else KODI_FIRST_CATEGORY
         xbmc.executebuiltin(f"SetFocus({first + slot})")
 
     def _pad_slot(self) -> int | None:
@@ -453,10 +458,21 @@ def _pointer_context() -> str:
     return xbmc.getInfoLabel("$VAR[WebOSPointerContext]")
 
 
+def _receiver_target() -> str | None:
+    """The add-on the remote's volume buttons go to: service.sonos following a
+    player, or service.denonavr following a receiver that's on; with both, the
+    skin's setup choice (Estuary YBLOD's setup_receiver_sonos) decides. None
+    when neither is ready (loop thread)."""
+    sonos = xbmc.getCondVisibility("String.IsEqual(Window(Home).Property(Sonos.Connected),true)")
+    denon = xbmc.getCondVisibility("String.IsEqual(Window(Home).Property(Denon.Connected),true)"
+                                   " + String.IsEqual(Window(Home).Property(Denon.Power),true)")
+    if sonos and (not denon or xbmc.getCondVisibility("Skin.HasSetting(setup_receiver_sonos)")):
+        return "service.sonos"
+    return "service.denonavr" if denon else None
+
+
 def _receiver_ready() -> bool:
-    """service.denonavr is following a receiver that's on (loop thread)."""
-    return xbmc.getCondVisibility("String.IsEqual(Window(Home).Property(Denon.Connected),true)"
-                                  " + String.IsEqual(Window(Home).Property(Denon.Power),true)")
+    return _receiver_target() is not None
 
 
 def _wheel_moves_focus() -> bool:
@@ -564,6 +580,7 @@ class WebOsService:
         self.sound: Any = None
         self.watcher: Any = None
         self.bridge: Any = None
+        self._kodi_back: asyncio.Future | None = None
         self.mouse: Any = None
         self.focus: Any = None
         self._inputs: tuple = ()
@@ -644,7 +661,8 @@ class WebOsService:
                                        self._bridge_changed, self.mouse, self._tv_cursor,
                                        self.focus, self._tv_pointer_settings,
                                        wheel if wheel.open() else None, _receiver_ready,
-                                       self.controller.reconnect_now, self._bridge_remote)
+                                       self.controller.reconnect_now, self._bridge_remote,
+                                       self._bring_back_kodi)
             await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
@@ -808,7 +826,11 @@ class WebOsService:
         for input_id, input_label, _app in getattr(state, "inputs", ()):
             if input_id == kodi_input and input_label != input_id:
                 kodi_input = f"{input_label} ({input_id})"
-        for key, value in (("KodiInput", kodi_input), ("ConfiguredHost", s.host)):
+        from .remotes import APP_BUTTONS, button_name  # noqa: PLC0415
+
+        kodi_buttons = ", ".join(button_name(c) for c in APP_BUTTONS if c in s.kodi_buttons)
+        for key, value in (("KodiInput", kodi_input), ("ConfiguredHost", s.host),
+                           ("KodiButtons", kodi_buttons)):
             if value:
                 window.setProperty(f"WebOS.{key}", value)
             else:
@@ -865,6 +887,39 @@ class WebOsService:
         else:
             window.clearProperty("WebOS.RemoteBridge")
 
+    def _bring_back_kodi(self, _code: int) -> None:
+        """Loop thread: an app button set to bring back Kodi was pressed elsewhere
+        on the TV. The TV starts that app too, and can take the screen back as it
+        loads: switch to Kodi, then again while it isn't on screen."""
+        if self.controller is None:
+            return
+        if self._kodi_back is not None and not self._kodi_back.done():
+            return
+        self._kodi_back = asyncio.ensure_future(self._switch_to_kodi())
+
+    async def _switch_to_kodi(self) -> None:
+        from .watcher import kodi_apps, kodi_foreground  # noqa: PLC0415
+
+        controller = self.controller
+        for delay in KODI_BACK_RETRIES:
+            await asyncio.sleep(delay)
+            if controller is None or not controller.connected:
+                return
+            if delay and kodi_foreground(self.settings, controller.state) is not False:
+                return  # Kodi is on screen (or the TV went off)
+            try:
+                if self.settings.kodi_input:
+                    await controller.set_input(self.settings.kodi_input)
+                else:
+                    apps = sorted(kodi_apps(self.settings, controller.state))
+                    if not apps:
+                        log.warning("an app button brings back Kodi, but Kodi's TV input isn't known yet")
+                        return
+                    await controller.launch_app(apps[0])
+            except (ActionError, BadRequest) as err:
+                log.warning(f"cannot switch back to Kodi: {err}")
+                return
+
     def _bridge_remote(self, label: str) -> None:
         """Loop thread: WebOS.Remote, the paired Magic Remote ("LG MR20"), for the settings page."""
         if self.closing:
@@ -912,10 +967,12 @@ class WebOsService:
         """Loop thread: a Remote Bridge button; the wheel scrolls what has focus."""
         from .bridge import RECEIVER  # noqa: PLC0415
 
-        if name.startswith(RECEIVER):  # a volume button for service.denonavr
-            xbmc.executeJSONRPC(json.dumps({
-                "jsonrpc": "2.0", "id": 1, "method": "JSONRPC.NotifyAll",
-                "params": {"sender": "service.denonavr", "message": name[len(RECEIVER):]}}))
+        if name.startswith(RECEIVER):  # a volume button for service.sonos or service.denonavr
+            target = _receiver_target()
+            if target:
+                xbmc.executeJSONRPC(json.dumps({
+                    "jsonrpc": "2.0", "id": 1, "method": "JSONRPC.NotifyAll",
+                    "params": {"sender": target, "message": name[len(RECEIVER):]}}))
             return
         if name == "kodihome":  # the remote's Home (held: the TV's home)
             xbmc.executebuiltin("ActivateWindow(home)")

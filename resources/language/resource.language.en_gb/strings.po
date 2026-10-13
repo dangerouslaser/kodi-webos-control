@@ -83,7 +83,7 @@ msgid "Log every SSAP request and response (client key redacted)."
 msgstr ""
 
 msgctxt "#32071"
-msgid "Forget the stored pairing key and show the pairing prompt on the TV again."
+msgid "Show the pairing prompt on the TV again. The current pairing is kept until the TV accepts the new one, so a refused or unanswered prompt changes nothing."
 msgstr ""
 
 msgctxt "#32100"
@@ -835,6 +835,18 @@ msgctxt "#32693"
 msgid "Fast"
 msgstr ""
 
+msgctxt "#32694"
+msgid "Buttons that bring back Kodi"
+msgstr ""
+
+msgctxt "#32695"
+msgid "Remote app buttons (Netflix, Prime Video...) that switch the TV back to Kodi from anywhere, instead of opening their app. In Kodi they do nothing. The TV may start the app for a moment first."
+msgstr ""
+
+msgctxt "#32696"
+msgid "None"
+msgstr ""
+
 msgctxt "#32619"
 msgid "The Remote Bridge app on the TV is version %s; this Kodi carries %s. Update it now?"
 msgstr ""
@@ -876,7 +888,7 @@ msgid "Very high"
 msgstr ""
 
 msgctxt "#32635"
-msgid "Volume buttons control the receiver"
+msgid "Volume buttons control the receiver or Sonos"
 msgstr ""
 
 msgctxt "#32636"
@@ -884,5 +896,5 @@ msgid "Update Remote Bridge on the TV"
 msgstr ""
 
 msgctxt "#32685"
-msgid "While Kodi is on screen, the TV remote's volume and mute buttons go to the audio receiver (service.denonavr) instead of the TV, with no HDMI-CEC. Elsewhere on the TV they work as before. Needs the Remote Bridge."
+msgid "While Kodi is on screen, the TV remote's volume and mute buttons go to the Denon receiver (service.denonavr) or the Sonos player (service.sonos) instead of the TV, with no HDMI-CEC. Elsewhere on the TV they work as before. Needs the Remote Bridge."
 msgstr ""

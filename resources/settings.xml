@@ -308,6 +308,17 @@
           </dependencies>
           <control type="toggle"/>
         </setting>
+        <!-- Codes of the remote's app buttons that bring back Kodi (remotes.APP_BUTTONS),
+             comma-separated; picked in a list (RunScript(service.webostv,setting,kodi_buttons)). -->
+        <setting id="kodi_buttons" type="string" label="32694" help="32695">
+          <level>0</level>
+          <default></default>
+          <visible>false</visible>
+          <constraints>
+            <allowempty>true</allowempty>
+          </constraints>
+          <control type="edit" format="string"/>
+        </setting>
         <setting id="bridge_wheel_speed" type="integer" label="32609" help="32659">
           <level>0</level>
           <default>2</default>
