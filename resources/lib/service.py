@@ -648,6 +648,11 @@ class WebOsService:
             f"Python {sys.version.split()[0]}, "
             f"Kodi {xbmc.getInfoLabel('System.BuildVersion') or 'unknown'})"
         )
+        from . import skinmove  # noqa: PLC0415
+
+        # The skin's old id to its new one, once (see skinmove).
+        threading.Thread(target=skinmove.run, args=(self.monitor,), name="webostv-skinmove",
+                         daemon=True).start()
         return True
 
     def _acquire_instance_lock(self) -> bool:

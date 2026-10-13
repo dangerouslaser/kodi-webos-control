@@ -158,7 +158,7 @@ mode it reports at the instant playback starts isn't a safe restore target.
 - **Sound output**: an output for movies and TV shows, Live TV and music (radio counts as music). The
   previous output comes back 3 s after playback stops, unless it was changed during playback.
 
-The OSD's **LG TV** menu (`ui,osd`, used by skin.estuary.lg) lists picture preset, motion smoothing,
+The OSD's **LG TV** menu (`ui,osd`, used by skin.estuary.yblod) lists picture preset, motion smoothing,
 OLED pixel brightness, HDR dynamic tone mapping, noise reduction, MPEG noise reduction, smooth
 gradation, super resolution, eye comfort, sound output and screen off, with current values. webOS 5.5
 accepts all of these but reports none, so it shows the last value sent from Kodi.
