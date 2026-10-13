@@ -48,6 +48,15 @@ PAD_ROW = "WebOS.PadRow"
 SETTINGS_PAD = 9101
 PAD_TOP, PAD_ROW_HEIGHT = 130, 85
 LGTV_WINDOW, LGTV_FIRST_CATEGORY = 1120, 21
+# The TV guide's channel group selector (MyPVRGuide.xml, fixedlist 11, which
+# slides along as its items get focus), and the skin's pad over it: its left
+# edge and item width. PAD_ROW then holds the slot (column) under the pointer.
+GUIDE_GROUPS, GUIDE_PAD = 11, 9102
+GUIDE_LEFT, GUIDE_ITEM = 40, 368
+# The guide's channel grid (vertical view, Includes_PVR.xml EpgGrid): its
+# first channel row's top on screen (window group 140 + grid 62 + ruler 45),
+# row height, and rows on screen (500 px of rows).
+GUIDE_GRID, GUIDE_ROWS_TOP, GUIDE_ROW, GUIDE_ROWS = 50, 247, 62, 8
 KODI_FIRST_CATEGORY = -200
 # Where things are on screen (FocusKeeper.places), kept between restarts.
 PLACES_FILE = "pointer_places.json"
@@ -140,6 +149,9 @@ class FocusKeeper:
     selection back on that section and clears the property: buttons behave
     as before.
 
+    The TV guide's channel group selector works the same way (GUIDE_PAD):
+    hovering highlights a group, a click switches to it.
+
     Settings side menus: Kodi switches the category page as soon as a
     category gets focus, so hovering down the list flicked through them.
     While the pointer is in use (WebOS.Pointing), the skin covers the list
@@ -168,15 +180,19 @@ class FocusKeeper:
         self._click_reset: asyncio.TimerHandle | None = None
         self._pointing = False
         self._pad_row: int | None = None
-        self._y = -1.0
+        self._x = self._y = -1.0
+        # The guide's Position as last read, and channels scrolled since (Kodi
+        # may not have caught up with a fast wheel yet).
+        self._guide_scrolled: tuple[str, int] = ("", 0)
+        self._groups_scrolled: tuple[str, int] = ("", 0)  # the same for its group list
 
     # -- pointer focus --
 
     def track(self, x: float = -1, y: float = -1) -> None:
         """The pointer moving, at x, y in skin coordinates (1920x1080)."""
         self._pointer_used()
-        self._y = y
-        self._pad_hover(y)
+        self._x, self._y = x, y
+        self._pad_hover()
         if not self._menu_row_under(y):
             self._menu_back_to_view()
         control = xbmc.getInfoLabel("System.CurrentControlID")
@@ -195,6 +211,62 @@ class FocusKeeper:
             return None
         window = xbmc.getInfoLabel("System.CurrentWindow")
         return self.places.where((window, control, _pointer_context()), _slot(control))
+
+    def wheel(self, items: int) -> bool:
+        """The wheel while pointing over the TV guide's channels (its group
+        list: see _wheel_groups): scroll them
+        `items` rows (> 0 up) under the pointer, which keeps highlighting the
+        row it's on (Kodi's own wheel there scrolls the time). False elsewhere.
+
+        The grid only scrolls when the highlight moves past its edge, so: up
+        or down to the edge, on by `items` (scrolling), and back to the
+        pointer's row, all as actions (buttons would hide the pointer)."""
+        if not _wheel_moves_focus():
+            return False
+        if xbmc.getCondVisibility(f"Control.HasFocus({GUIDE_PAD})"):
+            return self._wheel_groups(items)
+        if not xbmc.getCondVisibility(f"Control.HasFocus({GUIDE_GRID})"):
+            return False
+        position, count = (xbmc.getInfoLabel(f"Container({GUIDE_GRID}).{label}")
+                           for label in ("Position", "NumItems"))
+        if not (position.isdigit() and count.isdigit()) or self._y < GUIDE_ROWS_TOP:
+            return True
+        row = min(int((self._y - GUIDE_ROWS_TOP) // GUIDE_ROW), GUIDE_ROWS - 1)
+        seen, scrolled = self._guide_scrolled
+        if position != seen:
+            scrolled = 0  # Kodi has caught up
+        offset = int(position) - 1 - row + scrolled  # channels scrolled off the top
+        if offset < 0:
+            return True  # not where we think: leave it
+        if items > 0:
+            steps = min(items, offset)
+            moves = ["Up"] * (row + steps) + ["Down"] * row
+        else:
+            steps = min(-items, int(count) - GUIDE_ROWS - offset)
+            to_edge = GUIDE_ROWS - 1 - row
+            moves = ["Down"] * (to_edge + steps) + ["Up"] * to_edge
+        if steps > 0:  # at either end, moving on would leave the grid
+            for move in moves:
+                xbmc.executebuiltin(f"Action({move})")
+            self._guide_scrolled = (position, scrolled + (-steps if items > 0 else steps))
+        return True
+
+    def _wheel_groups(self, items: int) -> bool:
+        """Over the guide's group list: through the groups, up = left, as the
+        D-pad's left and right do there."""
+        current, count = (xbmc.getInfoLabel(f"Container({GUIDE_GROUPS}).{label}")
+                          for label in ("CurrentItem", "NumItems"))
+        if not (current.isdigit() and count.isdigit()):
+            return True
+        seen, moved = self._groups_scrolled
+        if current != seen:
+            moved = 0
+        here = int(current) + moved
+        target = max(1, min(int(count), here - items))
+        if target != here:
+            xbmc.executebuiltin(f"SetFocus({GUIDE_GROUPS},{target - 1},absolute)")
+            self._groups_scrolled = (current, target - int(current))
+        return True
 
     def restore(self) -> None:
         control = xbmc.getInfoLabel("System.CurrentControlID")
@@ -235,39 +307,63 @@ class FocusKeeper:
             self._pointing = False
             if xbmc.getCondVisibility(f"Control.HasFocus({SETTINGS_PAD})"):
                 xbmc.executebuiltin("SetFocus(3)")  # the category on show
+            elif xbmc.getCondVisibility(f"Control.HasFocus({GUIDE_PAD})"):
+                xbmc.executebuiltin(f"SetFocus({GUIDE_GROUPS})")
             home = xbmcgui.Window(10000)
             home.clearProperty(POINTING)
             home.clearProperty(PAD_ROW)
             self._pad_row = None
 
-    # -- settings side menus --
+    # -- settings side menus, the TV guide's group selector --
 
-    def _pad_hover(self, y: float) -> None:
-        row = self._pad_row_at(y) if xbmc.getCondVisibility(f"Control.HasFocus({SETTINGS_PAD})") else None
-        if row != self._pad_row:
-            self._pad_row = row
+    def _pad_hover(self) -> None:
+        slot = self._pad_slot()
+        if slot != self._pad_row:
+            self._pad_row = slot
             home = xbmcgui.Window(10000)
-            if row is None:
+            if slot is None:
                 home.clearProperty(PAD_ROW)
             else:
-                home.setProperty(PAD_ROW, str(row))
+                home.setProperty(PAD_ROW, str(slot))
 
     def _pad_click(self) -> None:
-        if not xbmc.getCondVisibility(f"Control.HasFocus({SETTINGS_PAD})"):
+        slot = self._pad_slot()
+        if slot is None:
             return
-        row = self._pad_row_at(self._y)
-        if row is None:
+        if xbmc.getCondVisibility(f"Control.HasFocus({GUIDE_PAD})"):
+            first = self._guide_first_item()
+            if first is not None:
+                xbmc.executebuiltin(f"SetFocus({GUIDE_GROUPS},{first + slot - 1},absolute)")
             return
         first = LGTV_FIRST_CATEGORY if xbmc.getCondVisibility(
             f"Window.IsActive({LGTV_WINDOW})") else KODI_FIRST_CATEGORY
-        xbmc.executebuiltin(f"SetFocus({first + row})")
+        xbmc.executebuiltin(f"SetFocus({first + slot})")
 
-    def _pad_row_at(self, y: float) -> int | None:
-        count = xbmc.getInfoLabel("Container(3).NumItems")
-        if y < PAD_TOP or not count.isdigit():
+    def _pad_slot(self) -> int | None:
+        """The settings row or guide group slot under the pointer, if over a pad."""
+        if xbmc.getCondVisibility(f"Control.HasFocus({SETTINGS_PAD})"):
+            count = xbmc.getInfoLabel("Container(3).NumItems")
+            if self._y < PAD_TOP or not count.isdigit():
+                return None
+            row = int((self._y - PAD_TOP) // PAD_ROW_HEIGHT)
+            return row if row < int(count) else None
+        if xbmc.getCondVisibility(f"Control.HasFocus({GUIDE_PAD})"):
+            first = self._guide_first_item()
+            count = xbmc.getInfoLabel(f"Container({GUIDE_GROUPS}).NumItems")
+            if first is None or self._x < GUIDE_LEFT or not count.isdigit():
+                return None
+            column = int((self._x - GUIDE_LEFT) // GUIDE_ITEM)
+            return column if 1 <= first + column <= int(count) else None
+        return None
+
+    def _guide_first_item(self) -> int | None:
+        """The group shown in the selector's first slot (1-based; the list
+        keeps its selection at a fixed slot, so this can be before the first)."""
+        current, position = (xbmc.getInfoLabel(f"Container({GUIDE_GROUPS}).{label}")
+                             for label in ("CurrentItem", "Position"))
+        if not (current.isdigit() and position.isdigit()):
             return None
-        row = int((y - PAD_TOP) // PAD_ROW_HEIGHT)
-        return row if row < int(count) else None
+        return int(current) - int(position)
 
     def close(self) -> None:
         """Service stopping: no GUI calls (see WebOsService.shutdown)."""
@@ -354,6 +450,12 @@ def _pointer_context() -> str:
     if not xbmc.getInfoLabel("Window(Home).Property(WebOS.PointerContext)"):
         return ""
     return xbmc.getInfoLabel("$VAR[WebOSPointerContext]")
+
+
+def _wheel_moves_focus() -> bool:
+    """Windows where the wheel moves the highlight up and down: the TV and
+    radio guides (Kodi scrolls their time with a wheel)."""
+    return xbmc.getCondVisibility("Window.IsActive(tvguide) | Window.IsActive(radioguide)")
 
 
 def _menu_has_focus() -> bool:
@@ -493,6 +595,7 @@ class WebOsService:
         from .automations import PlaybackRules  # noqa: PLC0415
         from .bridge import RemoteBridge  # noqa: PLC0415
         from .eventserver import EventServerMouse  # noqa: PLC0415
+        from .uinput import VirtualWheel  # noqa: PLC0415
         from .remote import Overlay  # noqa: PLC0415
         from .soundrules import SoundRules  # noqa: PLC0415
         from .state import PropertyPublisher  # noqa: PLC0415
@@ -529,9 +632,11 @@ class WebOsService:
             self.watcher = TvWatcher(self.controller, self.settings, _KodiSide(self))
             self.mouse = EventServerMouse(_eventserver_port())
             self.focus = FocusKeeper()
+            wheel = VirtualWheel()
             self.bridge = RemoteBridge(self.settings, self._remote_button, self._kodi_on_screen,
                                        self._bridge_changed, self.mouse, self._tv_cursor,
-                                       self.focus, self._tv_pointer_settings)
+                                       self.focus, self._tv_pointer_settings,
+                                       wheel if wheel.open() else None)
             await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
@@ -791,7 +896,9 @@ class WebOsService:
             return
         trigger, button, sideways = wheel
         control = xbmc.getInfoLabel("System.CurrentControlID")
-        if _skin_says("WebOS.WheelSideways"):
+        if _wheel_moves_focus():
+            _press_button(button)  # the guide's analog scroll moves through time
+        elif _skin_says("WebOS.WheelSideways"):
             # A horizontal row (the skin says which): one item per notch, stopping
             # at its ends (left from the first item would leave the row).
             if not _at_row_end(control, sideways):

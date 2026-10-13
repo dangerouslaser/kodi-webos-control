@@ -178,6 +178,13 @@ class KeyMapper:
     def wheel(self, steps: int) -> None:
         if not self._active():
             return
+        items = self.wheel_items(steps)
+        action = WHEEL_UP if items > 0 else WHEEL_DOWN
+        for _ in range(abs(items)):
+            self._execute(action)
+
+    def wheel_items(self, steps: int) -> int:
+        """Items to scroll for these notches at the wheel speed (> 0: up)."""
         now = asyncio.get_running_loop().time()
         pending, last = self._wheel
         if now - last > WHEEL_GAP or pending * steps < 0:
@@ -185,9 +192,7 @@ class KeyMapper:
         pending += steps * self._wheel_speed()
         items = int(pending)  # toward zero: whole items only
         self._wheel = (pending - items, now)
-        action = WHEEL_UP if items > 0 else WHEEL_DOWN
-        for _ in range(min(abs(items), 5)):
-            self._execute(action)
+        return max(-5, min(5, items))
 
     def release_all(self) -> None:
         for handle in self._long.values():
@@ -250,7 +255,8 @@ class RemoteBridge:
                  mouse: Any = None,
                  on_cursor: Callable[[dict[str, bytes], str], None] | None = None,
                  focus: Any = None,
-                 on_tv: Callable[[dict[str, str]], None] | None = None) -> None:
+                 on_tv: Callable[[dict[str, str]], None] | None = None,
+                 wheel: Any = None) -> None:
         self.settings = settings
         self.mapper = KeyMapper(self._run, on_screen, lambda: self.settings.bridge_wheel_speed)
         self._execute = execute
@@ -262,6 +268,9 @@ class RemoteBridge:
         # where the focused item is (skin coordinates) or None.
         self._focus = focus
         self._on_tv = on_tv  # the TV's pointer settings, as reported
+        # .wheel(x, y, notches) at a screen position, False if it can't
+        # (uinput.VirtualWheel): scrolls what's under the pointer.
+        self._wheel = wheel
         self._tracked_at = 0.0
         self._resting: asyncio.TimerHandle | None = None
         self._published: str | None = None
@@ -296,6 +305,8 @@ class RemoteBridge:
         await self._repo.close()
         if self._mouse is not None:
             self._mouse.close()
+        if self._wheel is not None:
+            self._wheel.close()
 
     def status(self) -> dict[str, Any]:
         client = next(iter(self._clients.values()), None)
@@ -550,11 +561,29 @@ class RemoteBridge:
             self._resting = loop.call_later(POINTER_REST, self._pointer_rest)
         elif "wheel" in msg:
             with contextlib.suppress(TypeError, ValueError):
+                if self._wheel_at_pointer(info, int(msg["wheel"])):
+                    return
                 self._hide_pointer(info)
                 if self._focus is not None and self._on_screen():
                     self._focus.key()
                 self.mapper.wheel(int(msg["wheel"]))
 
+
+    def _wheel_at_pointer(self, info: dict[str, Any], steps: int) -> bool:
+        """Pointing: scroll what's under the pointer, like a mouse wheel, and
+        keep the pointer up. False when the pointer is hidden (the wheel then
+        moves the focus) or there's no virtual wheel."""
+        shown = info.get("shown")
+        if shown is None or not self._pointer_visible(info) or not self._on_screen():
+            return False
+        items = self.mapper.wheel_items(steps)
+        if self._focus is not None and self._focus.wheel(items):
+            return True  # the add-on scrolled it (the TV guide's channels)
+        max_x, max_y = info["pointer"]
+        if self._wheel is None or (items and not self._wheel.wheel(shown[0] / max_x, shown[1] / max_y, items)):
+            return False
+        info["shown_at"] = asyncio.get_running_loop().time()  # a wheel keeps Kodi's mouse up too
+        return True
 
     def _hide_pointer(self, info: dict[str, Any]) -> None:
         """Kodi hides its mouse on a button press; keep it hidden till the remote

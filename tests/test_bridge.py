@@ -487,6 +487,82 @@ async def test_pointer_stays_hidden_after_a_button_until_the_remote_really_moves
         await rb.close()
 
 
+class Wheel:
+    def __init__(self, works=True):
+        self.works = works
+        self.scrolls = []
+        self.closed = False
+
+    def wheel(self, x, y, notches):
+        self.scrolls.append((round(x, 3), round(y, 3), notches))
+        return self.works
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.mark.parametrize("works", [True, False])
+async def test_wheel_while_pointing_scrolls_under_the_pointer_and_keeps_it(kodi_side, works):
+    mouse, wheel = Mouse(), Wheel(works)
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse, wheel=wheel)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+
+        async def send(*msgs):
+            for msg in msgs:
+                writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.05)
+
+        await send({"pos": [960, 270]}, {"wheel": -1}, {"wheel": 2})
+        # Once the virtual wheel fails, the pointer is down and it isn't tried again.
+        assert wheel.scrolls == [(0.5, 0.25, -1), (0.5, 0.25, 2)][:2 if works else 1]
+        await send({"pos": [965, 272]})  # a small move right after
+        if works:
+            assert kodi_side.actions == []  # not the focused list
+            assert mouse.moves[-1][:2] == (965, 272)  # the pointer stayed up
+        else:  # no virtual wheel: the wheel moves the focus and hides the pointer
+            assert kodi_side.actions == ["wheeldown", "wheelup", "wheelup"]
+            assert mouse.moves[-1][:2] == (960, 270)
+    finally:
+        await rb.close()
+    assert wheel.closed
+
+
+async def test_wheel_in_the_guide_goes_to_the_add_on(kodi_side):
+    mouse, wheel, focus = Mouse(), Wheel(), Focus(guide=True)
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse, focus=focus, wheel=wheel)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        writer.write(b'{"pos": [960, 500]}\n{"wheel": -1}\n{"pos": [962, 501]}\n')
+        await writer.drain()
+        await wait_for(lambda: len(mouse.moves) == 2)
+        assert "wheel -1" in focus.calls
+        assert wheel.scrolls == [] and kodi_side.actions == []
+        assert mouse.moves[-1][:2] == (962, 501)  # the pointer carries on
+    finally:
+        await rb.close()
+
+
+async def test_wheel_without_the_pointer_moves_the_focus(kodi_side):
+    wheel = Wheel()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(), wheel=wheel)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        writer.write(b'{"wheel": -1}\n')
+        await writer.drain()
+        await wait_for(lambda: kodi_side.actions)
+        assert kodi_side.actions == ["wheeldown"] and wheel.scrolls == []
+    finally:
+        await rb.close()
+
+
 @pytest.mark.parametrize(("container", "skin", "expect"), [
     ("12", "", "trigger"),                       # vertical list: analog scroll
     ("12", "WebOS.WheelSideways", "right"),      # a row: one item sideways
@@ -538,9 +614,10 @@ def test_eventserver_analog_button_packet():
 
 
 class Focus:
-    def __init__(self, where=None) -> None:
+    def __init__(self, where=None, guide=False) -> None:
         self.calls: list[str] = []
         self.where = where
+        self.guide = guide  # the wheel moves the highlight (the TV guide)
 
     def track(self, x=-1, y=-1):
         self.calls.append("track")
@@ -556,6 +633,10 @@ class Focus:
 
     def spot(self):
         return self.where
+
+    def wheel(self, items):
+        self.calls.append(f"wheel {items}")
+        return self.guide
 
 
 async def test_resting_pointer_refocuses_once_and_before_buttons(kodi_side, monkeypatch):
@@ -880,6 +961,83 @@ async def test_focus_keeper_learns_where_items_are(kodi):
     assert keeper.spot() == (1300, 300)
     kodi.info_labels["System.CurrentControlID"] = "802"  # never pointed at
     assert keeper.spot() is None
+    keeper.close()
+
+
+@pytest.mark.parametrize(("position", "items", "moves"), [
+    ("13", -1, ["Down"] * 6 + ["Up"] * 5),   # third row: down to the edge, on one, back
+    ("13", 2, ["Up"] * 4 + ["Down"] * 2),    # up to the top, on two, back
+    ("3", 1, []),                            # the first channel's already on top
+    ("15", -1, []),                          # the last channels are on screen
+])
+async def test_guide_wheel_scrolls_the_channels_under_the_pointer(kodi, position, items, moves):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    kodi.info_labels.update({"System.CurrentControlID": "50", "Container(50).Position": position,
+                             "Container(50).NumItems": "20"})
+    keeper.track(800, 247 + 2 * 62 + 30)        # the third row
+    assert keeper.wheel(items) is False         # not the guide
+    kodi.conditions["Window.IsActive(tvguide) | Window.IsActive(radioguide)"] = True
+    assert keeper.wheel(items) is False         # the guide, but not over its channels
+    kodi.conditions["Control.HasFocus(50)"] = True
+    assert keeper.wheel(items) is True
+    assert kodi.builtins == [f"Action({m})" for m in moves]
+    keeper.close()
+
+
+async def test_guide_wheel_over_the_groups_goes_sideways(kodi):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    kodi.conditions["Window.IsActive(tvguide) | Window.IsActive(radioguide)"] = True
+    kodi.conditions["Control.HasFocus(9102)"] = True
+    kodi.info_labels.update({"Container(11).CurrentItem": "2", "Container(11).NumItems": "4"})
+    assert keeper.wheel(-1) is True             # down: the next group, on the right
+    assert keeper.wheel(-1) is True             # before Kodi catches up
+    assert keeper.wheel(-5) is True             # past the last: stays there
+    assert keeper.wheel(4) is True              # back to the first
+    assert kodi.builtins == ["SetFocus(11,2,absolute)", "SetFocus(11,3,absolute)",
+                             "SetFocus(11,0,absolute)"]
+    keeper.close()
+
+
+async def test_fast_guide_wheel_stops_at_the_end_before_kodi_catches_up(kodi):
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    kodi.conditions["Window.IsActive(tvguide) | Window.IsActive(radioguide)"] = True
+    kodi.conditions["Control.HasFocus(50)"] = True
+    kodi.info_labels.update({"System.CurrentControlID": "50", "Container(50).Position": "13",
+                             "Container(50).NumItems": "20"})
+    keeper.track(800, 247 + 2 * 62 + 30)        # the third row: channels 11-18 on screen
+    for _ in range(4):                          # Position not updated yet
+        keeper.wheel(-1)
+    assert kodi.builtins.count("Action(Down)") - kodi.builtins.count("Action(Up)") == 2  # 19, 20
+    keeper.close()
+
+
+async def test_guide_groups_switch_on_click_not_hover(kodi):
+    import xbmcgui
+
+    from resources.lib.service import FocusKeeper
+
+    keeper = FocusKeeper()
+    kodi.info_labels.update({"System.CurrentWindow": "TV guide", "System.CurrentControlID": "9102",
+                             "Container(11).CurrentItem": "3", "Container(11).Position": "0",
+                             "Container(11).NumItems": "4"})
+    kodi.conditions["Control.HasFocus(9102)"] = True
+    home = xbmcgui.Window(10000)
+    keeper.track(40 + 368 + 100, 165)          # over the second slot: group 4
+    assert home.getProperty("WebOS.PadRow") == "1"
+    assert kodi.builtins == []                 # hovering switches nothing
+    keeper.track(40 + 2 * 368 + 100, 165)      # past the last group
+    assert home.getProperty("WebOS.PadRow") == ""
+    keeper.track(60, 165)
+    keeper.click()
+    assert kodi.builtins == ["SetFocus(11,2,absolute)"]  # group 3 (0-based 2)
+    keeper.key()
+    assert kodi.builtins[-1] == "SetFocus(11)"
     keeper.close()
 
 

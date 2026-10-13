@@ -208,6 +208,9 @@ usually don't have). Needs a rooted TV with [Homebrew Channel](https://github.co
 - The pointer uses the TV's own pointer images and settings (speed, size, shape, alignment,
   auto-hide), which can also be changed from Kodi. After the D-pad hides it, it comes back on the
   focused item; wake sensitivity and wheel speed are settings.
+- The wheel scrolls what's under the pointer, like a mouse wheel (a virtual mouse on `/dev/uinput`, so
+  the pointer stays up); in the TV guide it scrolls the channels under the pointer, and the groups
+  over the group list. With the pointer hidden it moves the focus.
 - **Remove** stops the daemon and removes its startup hook; uninstall the app in Homebrew Channel
   to remove it completely.
 
