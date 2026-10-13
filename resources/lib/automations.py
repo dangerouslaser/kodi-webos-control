@@ -26,9 +26,11 @@ mode and won't report it, so it is sent after the picture mode settles,
 without confirmation, and a fixed "after playback" value is sent on stop.
 
 Source quality (noise reduction, MPEG noise reduction, smooth gradation,
-super resolution) follows the source: Live TV, SD or HD. Also per picture
-mode; on TVs that report it, the previous values come back on stop if the
-TV is still in the picture mode they were changed in.
+super resolution) follows the source: Live TV, SD, HD or 4K. Also per
+picture mode. On stop it goes to the "after playback" level if one is set
+(once the TV is back in an SDR picture mode, like motion smoothing);
+otherwise, on TVs that report it, the previous values come back if the TV is
+still in the picture mode they were changed in.
 """
 
 from __future__ import annotations
@@ -103,6 +105,7 @@ class PlaybackRules:
         self._fps = 0.0
         self._source: str | None = None
         self._motion_applied = False
+        self._quality_applied = False
         # Source-quality values before Kodi changed them, and the picture
         # mode they belong to.
         self._quality_saved: dict[str, str] = {}
@@ -327,20 +330,26 @@ class PlaybackRules:
             log.warning(f"cannot set motion smoothing {target!r}: {err.message}")
         return True
 
-    def _quality_target(self) -> str:
+    def _quality_target(self) -> dict[str, str]:
+        """The cleanup values for what's playing: {picture key: value}, {} for none."""
         s = self.settings
-        return {"livetv": s.quality_livetv, "sd": s.quality_sd, "hd": s.quality_hd}.get(self._source or "", "")
+        source = self._source or ""
+        if source == "uhd" and s.quality_uhd == "same":
+            source = "hd"
+        level = {"livetv": s.quality_livetv, "sd": s.quality_sd, "hd": s.quality_hd,
+                 "uhd": s.quality_uhd}.get(source, "")
+        return quality_values(level, s.quality_custom.get(source))
 
     async def _apply_quality(self, kind: str | None, *, settled: bool) -> None:
-        level = self._quality_target()
-        if not level:
+        values = self._quality_target()
+        if not values:
             return
         abort = lambda: self._stop_requested  # noqa: E731
         if not settled:
             await self._wait_signal(kind, abort=abort)
         if abort() or not self.controller.connected:
             return
-        values = dict.fromkeys(adjustments.QUALITY_KEYS, level)
+        level = describe_quality(values)
         try:
             if self.controller.picture_readable and not self._quality_saved:
                 saved = await self.controller.picture_settings(adjustments.QUALITY_KEYS)
@@ -348,6 +357,7 @@ class PlaybackRules:
                     self._quality_saved = saved
                     self._quality_mode = self.controller.picture_preset
             await self.controller.set_picture_values(values)
+            self._quality_applied = True
             log.info(f"{self._source} source: picture cleanup {level}")
         except ActionError as err:
             log.warning(f"cannot set picture cleanup {level!r}: {err.message}")
@@ -379,7 +389,7 @@ class PlaybackRules:
                     else:
                         log.info(f"playback ended: restored picture preset {target}")
             await self._restore_motion(settled=restored)
-            await self._restore_quality()
+            await self._restore_quality(settled=restored)
             if self._screen_off and self.controller.connected:
                 with contextlib.suppress(ActionError):
                     await self.controller.screen(True)
@@ -392,12 +402,26 @@ class PlaybackRules:
         finally:
             self.applied = False
             self._motion_applied = False
+            self._quality_applied = False
             self._quality_saved = {}
             self._quality_mode = ""
             self._screen_off = False
             self._session = False
 
-    async def _restore_quality(self) -> None:
+    async def _restore_quality(self, *, settled: bool = True) -> None:
+        after = quality_values(self.settings.quality_restore, self.settings.quality_custom.get("restore"))
+        if self.settings.quality_restore:
+            if not (self._quality_applied and self.controller.connected):
+                return
+            if not settled:
+                await self._wait_signal("sdr")  # Kodi's menus are SDR: not into an HDR memory
+            try:
+                if after:
+                    await self.controller.set_picture_values(after)
+                    log.info(f"playback ended: picture cleanup {describe_quality(after)}")
+            except ActionError as err:
+                log.warning(f"cannot set picture cleanup {describe_quality(after)}: {err.message}")
+            return
         saved = self._quality_saved
         if not (saved and self.controller.connected):
             return
@@ -431,6 +455,22 @@ class PlaybackRules:
                 await self._pending
         with contextlib.suppress(ValueError):
             self.controller.picture_listeners.remove(self._on_picture)
+
+
+def quality_values(level: str, custom: dict[str, str] | None) -> dict[str, str]:
+    """A cleanup level as picture values: every cleanup at that level, or for
+    "custom" the ones set on their own (leaving the rest unchanged)."""
+    if level == "custom":
+        return {key: value for key, value in (custom or {}).items() if value}
+    return dict.fromkeys(adjustments.QUALITY_KEYS, level) if level else {}
+
+
+def describe_quality(values: dict[str, str]) -> str:
+    """"high", or "noiseReduction=off, superResolution=low" for a custom set."""
+    levels = set(values.values())
+    if len(levels) == 1 and len(values) == len(adjustments.QUALITY_KEYS):
+        return levels.pop()
+    return ", ".join(f"{key}={value}" for key, value in values.items())
 
 
 async def _noop() -> None:

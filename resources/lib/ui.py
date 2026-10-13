@@ -9,7 +9,8 @@ import xbmc
 import xbmcaddon
 import xbmcgui
 
-from . import ipc, lang
+from . import adjustments, ipc, lang
+from .settings import QUALITY_CUSTOM, QUALITY_SOURCES
 
 ADDON_NAME = "LG webOS TV"
 
@@ -321,7 +322,12 @@ EDITABLE_OPTIONS = {
     "on_switch_away": (32210, 32211, 32212),
     **{key: (32410, 32411, 32412, 32413, 32414) for key in ("motion_film", "motion_video", "motion_restore")},
     **{key: (32420, 32421, 32422, 32423, 32424, 32425) for key in ("sound_video", "sound_livetv", "sound_music")},
-    **{key: (32530, 32531, 32532, 32533, 32534) for key in ("quality_livetv", "quality_sd", "quality_hd")},
+    **{key: (32530, 32531, 32532, 32533, 32534, 32537) for key in ("quality_livetv", "quality_sd", "quality_hd")},
+    "quality_uhd": (32536, 32530, 32531, 32532, 32533, 32534, 32537),
+    "quality_restore": (32535, 32531, 32532, 32533, 32534, 32537),
+    # Custom cleanup: "" (leave unchanged), then the values' own labels.
+    **{f"quality_{source}_{short}": (32530, *(adjustments.VALUE_LABELS[v] for v in values[1:]))
+       for source in QUALITY_SOURCES for short, values in QUALITY_CUSTOM.values()},
     "bridge_pointer_wake": (32640, 32641, 32642, 32643),
     "bridge_wheel_speed": (32690, 32691, 32692, 32693),
     "tv_pointer_speed": (32660, 32661, 32662),
@@ -332,7 +338,10 @@ OPTION_HEADINGS = {
     "on_tv_off": 32203, "on_switch_away": 32204,
     "motion_film": 32401, "motion_video": 32402, "motion_restore": 32403,
     "sound_video": 32404, "sound_livetv": 32405, "sound_music": 32406,
-    "quality_livetv": 32521, "quality_sd": 32522, "quality_hd": 32523,
+    "quality_livetv": 32521, "quality_sd": 32522, "quality_hd": 32523, "quality_uhd": 32525,
+    "quality_restore": 32524,
+    **{f"quality_{source}_{short}": adjustments.ADJUSTMENTS[key].label
+       for source in QUALITY_SOURCES for key, (short, _values) in QUALITY_CUSTOM.items()},
     "bridge_pointer_wake": 32606, "bridge_wheel_speed": 32609,
     "tv_pointer_speed": 32630, "tv_pointer_size": 32631, "tv_pointer_shape": 32632,
 }

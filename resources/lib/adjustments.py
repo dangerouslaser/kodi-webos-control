@@ -54,14 +54,18 @@ VALUE_LABELS = {"off": 32510, "on": 32511, "low": 32512, "medium": 32513, "high"
 QUALITY_KEYS = ("noiseReduction", "mpegNoiseReduction", "smoothGradation", "superResolution")
 # Setting index -> level; "" = leave unchanged.
 QUALITY_LEVELS = ("", *LEVELS)
-# Below this video height counts as SD.
+# Below this video height counts as SD; from UHD_MIN_HEIGHT up, 4K (and 1440p).
+# Scope films are wide, not tall: 3840x1600 is 4K, 1920x1080 is HD.
 HD_MIN_HEIGHT = 720
+UHD_MIN_HEIGHT = 1200
 
 
 def source_class(content: str, height: int) -> str | None:
-    """"livetv", "sd" or "hd" for what's playing; None when unknown."""
+    """"livetv", "sd", "hd" or "uhd" for what's playing; None when unknown."""
     if content == "livetv":
         return "livetv"
     if height <= 0:
         return None
-    return "sd" if height < HD_MIN_HEIGHT else "hd"
+    if height < HD_MIN_HEIGHT:
+        return "sd"
+    return "hd" if height < UHD_MIN_HEIGHT else "uhd"

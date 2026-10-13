@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import xbmcaddon
 
@@ -14,7 +14,19 @@ SWITCH_AWAY_ACTIONS = ("none", "pause", "stop")
 MOTION_MODES = ("", "off", "cinemaClear", "natural", "smooth")
 # Sound outputs a rule can pick; "" = leave unchanged.
 # Source-quality cleanup level; "" = leave unchanged.
-QUALITY_LEVELS = ("", "off", "low", "medium", "high")
+QUALITY_LEVELS = ("", "off", "low", "medium", "high", "custom")
+# "custom": each cleanup on its own (quality_<source>_<short>): setting index ->
+# value, "" = leave unchanged. Sources: the four kinds of video, and "restore"
+# (after playback).
+QUALITY_CUSTOM: dict[str, tuple[str, tuple[str, ...]]] = {
+    "noiseReduction": ("nr", ("", "off", "low", "medium", "high", "auto")),
+    "mpegNoiseReduction": ("mpeg", ("", "off", "low", "medium", "high", "auto")),
+    "smoothGradation": ("grad", ("", "off", "low", "medium", "high")),
+    "superResolution": ("sr", ("", "off", "low", "medium", "high")),
+}
+QUALITY_SOURCES = ("livetv", "sd", "hd", "uhd", "restore")
+# 4K cleanup: "same" = the HD level (4K was part of HD before 0.8.7).
+QUALITY_UHD_LEVELS = ("same", *QUALITY_LEVELS)
 # Remote Bridge: how far the remote must move to bring the pointer back after
 # a button press (setting index -> distance in the TV's 1920-wide coordinates).
 POINTER_WAKES = (900, 300, 100, 25)
@@ -124,6 +136,10 @@ class Settings:
     quality_livetv: str = ""
     quality_sd: str = ""
     quality_hd: str = ""
+    quality_uhd: str = "same"
+    quality_restore: str = ""  # after playback; "": back to what it was before
+    # source -> {picture key: value} for the sources set to "custom"
+    quality_custom: dict[str, dict[str, str]] = field(default_factory=dict)
     # Sound output by content
     sound_video: str = ""
     sound_livetv: str = ""
@@ -176,6 +192,13 @@ class Settings:
             quality_livetv=_option(addon, "quality_livetv", QUALITY_LEVELS),
             quality_sd=_option(addon, "quality_sd", QUALITY_LEVELS),
             quality_hd=_option(addon, "quality_hd", QUALITY_LEVELS),
+            quality_uhd=_option(addon, "quality_uhd", QUALITY_UHD_LEVELS),
+            quality_restore=_option(addon, "quality_restore", QUALITY_LEVELS),
+            quality_custom={
+                source: {key: _option(addon, f"quality_{source}_{short}", values)
+                         for key, (short, values) in QUALITY_CUSTOM.items()}
+                for source in QUALITY_SOURCES
+            },
             sound_video=_option(addon, "sound_video", SOUND_RULE_OUTPUTS),
             sound_livetv=_option(addon, "sound_livetv", SOUND_RULE_OUTPUTS),
             sound_music=_option(addon, "sound_music", SOUND_RULE_OUTPUTS),

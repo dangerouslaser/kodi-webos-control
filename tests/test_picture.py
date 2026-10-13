@@ -413,7 +413,8 @@ async def test_sound_output_changed_by_user_is_kept(tv, controller):
 
 @pytest.mark.parametrize(("content", "height", "cls"), [
     ("livetv", 0, "livetv"), ("livetv", 2160, "livetv"), ("video", 576, "sd"),
-    ("video", 720, "hd"), ("video", 2160, "hd"), ("video", 0, None),
+    ("video", 720, "hd"), ("video", 1080, "hd"), ("video", 1600, "uhd"), ("video", 2160, "uhd"),
+    ("video", 0, None),
 ])
 def test_source_class(content, height, cls):
     from resources.lib.adjustments import source_class
@@ -483,3 +484,49 @@ async def test_source_quality_unknown_source_does_nothing(tv, controller):
     await asyncio.sleep(0.4)
     assert tv.luna_calls == []
     await rules.close()
+
+
+async def test_4k_follows_hd_unless_set_and_custom_picks_cleanups(tv, controller):
+    custom = {"uhd": {"noiseReduction": "off", "mpegNoiseReduction": "", "smoothGradation": "low",
+                      "superResolution": ""}}
+    settings = dataclasses.replace(BASE, quality_hd="medium", quality_uhd="custom", quality_custom=custom,
+                                   rules_debounce=0.1)
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("sdr", 24, "video", 1600)  # a wide 4K film
+    await wait_for(lambda: tv.model.picture.get("filmMaker", {}).get("smoothGradation") == "low")
+    applied = tv.model.picture["filmMaker"]
+    assert applied["noiseReduction"] == "off"
+    assert "superResolution" not in applied and "mpegNoiseReduction" not in applied  # left unchanged
+    rules.stopped()
+    await rules.close()
+
+    settings = dataclasses.replace(BASE, quality_hd="medium", rules_debounce=0.1)  # 4K: same as HD
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("sdr", 24, "video", 2160)
+    await wait_for(lambda: tv.model.picture["filmMaker"].get("superResolution") == "medium")
+    await rules.close()
+
+
+async def test_cleanup_after_playback_sets_a_level(tv, controller):
+    tv.model.picture["filmMaker"] = dict.fromkeys(QUALITY, "low")
+    settings = dataclasses.replace(BASE, quality_livetv="high", quality_restore="off", rules_debounce=0.1)
+    rules = PlaybackRules(controller, settings)
+    rules.av_started("sdr", 50, "livetv", 1080)
+    await wait_for(lambda: tv.model.picture["filmMaker"]["superResolution"] == "high")
+    rules.stopped()
+    # Not back to "low": the after-playback level.
+    await wait_for(lambda: tv.model.picture["filmMaker"]["noiseReduction"] == "off")
+    assert {k: tv.model.picture["filmMaker"][k] for k in QUALITY} == dict.fromkeys(QUALITY, "off")
+    await rules.close()
+
+
+def test_quality_values():
+    from resources.lib.automations import describe_quality, quality_values
+
+    assert quality_values("high", None) == dict.fromkeys(QUALITY, "high")
+    assert quality_values("", {"noiseReduction": "off"}) == {}
+    assert quality_values("custom", None) == {}
+    picked = quality_values("custom", {"noiseReduction": "auto", "superResolution": ""})
+    assert picked == {"noiseReduction": "auto"}
+    assert describe_quality(dict.fromkeys(QUALITY, "low")) == "low"
+    assert describe_quality(picked) == "noiseReduction=auto"
