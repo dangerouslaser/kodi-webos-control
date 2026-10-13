@@ -571,3 +571,22 @@ def test_player_hook_passes_video_height(running):
                              "Player.Process(videoheight)": "576"})
     service.player.onAVStarted()
     wait_until(lambda: tv.model.picture.get("filmMaker", {}).get("superResolution") == "medium")
+
+
+def test_osd_motion_cinematic_movement(running):
+    # Picking "Cinematic Movement" failed: the action lowercased "cinemaClear"
+    # and then didn't recognise it.
+    _service, tv = running
+    from resources.lib import ui
+
+    xbmcgui.select_answers.append(1)  # Cinematic Movement
+    ui.run_page("motion")
+    assert tv.model.motion == {"filmMaker": "cinemaClear"}
+
+
+def test_choice_accepts_any_case_and_keeps_the_tv_spelling():
+    from resources.lib.actions import _choice
+
+    parse = _choice("off", "cinemaClear")
+    assert parse(["CINEMACLEAR"]) == {"value": "cinemaClear"}
+    assert parse([" Off "]) == {"value": "off"}

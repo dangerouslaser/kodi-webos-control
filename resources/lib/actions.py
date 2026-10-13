@@ -53,9 +53,11 @@ def _choice(*choices: str, default: str | None = None) -> Parser:
             return {"value": default}
         if len(args) != 1:
             raise BadRequest(f"expected one of {', '.join(choices)}")
-        value = str(args[0]).strip().lower()
-        if value not in choices:
-            raise BadRequest(f"expected one of {', '.join(choices)}, got {value!r}")
+        # Any case in, the TV's own spelling out ("cinemaclear" -> "cinemaClear").
+        given = str(args[0]).strip()
+        value = next((c for c in choices if c.lower() == given.lower()), None)
+        if value is None:
+            raise BadRequest(f"expected one of {', '.join(choices)}, got {given!r}")
         return {"value": value}
 
     return parse
