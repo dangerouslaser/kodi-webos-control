@@ -1,9 +1,9 @@
 {
   "id": "com.github.dangerouslaser.kodiremote",
-  "version": "0.6.3",
+  "version": "0.6.5",
   "title": "Remote Bridge for Kodi",
   "appDescription": "Sends the TV remote's buttons to Kodi over the network, in place of HDMI-CEC (rooted TV with Homebrew Channel)",
-  "ipk": "com.github.dangerouslaser.kodiremote_0.6.3_all.ipk",
-  "size": 25824,
-  "sha256": "d8541488d4ed46d4bdcd6c0aa761fa94b973ab954c41cdb47e079ce6f4380f51"
+  "ipk": "com.github.dangerouslaser.kodiremote_0.6.5_all.ipk",
+  "size": 26196,
+  "sha256": "7072e7c2c3542c64aa1fe3a5cd46aed09f658c1616903ab62bee9aca6c0ee029"
 }

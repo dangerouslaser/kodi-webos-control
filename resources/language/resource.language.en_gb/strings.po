@@ -847,6 +847,14 @@ msgctxt "#32696"
 msgid "None"
 msgstr ""
 
+msgctxt "#32697"
+msgid "Pointer stays up for the arrow buttons"
+msgstr ""
+
+msgctxt "#32698"
+msgid "The arrow buttons move the selection without hiding the pointer: it moves to the item they selected. Off, they hide it, as on the TV, until the remote moves."
+msgstr ""
+
 msgctxt "#32619"
 msgid "The Remote Bridge app on the TV is version %s; this Kodi carries %s. Update it now?"
 msgstr ""

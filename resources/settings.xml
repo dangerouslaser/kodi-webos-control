@@ -300,6 +300,14 @@
           </dependencies>
           <control type="toggle"/>
         </setting>
+        <setting id="bridge_pointer_arrows" type="boolean" label="32697" help="32698">
+          <level>0</level>
+          <default>false</default>
+          <dependencies>
+            <dependency type="enable" setting="bridge_pointer">true</dependency>
+          </dependencies>
+          <control type="toggle"/>
+        </setting>
         <setting id="bridge_volume_receiver" type="boolean" label="32635" help="32685">
           <level>0</level>
           <default>false</default>

@@ -74,15 +74,42 @@ def _unfilter(kind: int, line: bytearray, prev: bytearray, bpp: int) -> None:
             raise PngError(f"bad filter {kind}")
 
 
-def write_rgba(width: int, height: int, pixels: bytes | bytearray) -> bytes:
+def _chunk(kind: bytes, body: bytes) -> bytes:
+    return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
+
+
+def _deflated(width: int, height: int, pixels: bytes | bytearray) -> bytes:
     stride = width * 4
-    raw = b"".join(b"\0" + bytes(pixels[y * stride:(y + 1) * stride]) for y in range(height))
+    return zlib.compress(b"".join(b"\0" + bytes(pixels[y * stride:(y + 1) * stride]) for y in range(height)), 9)
 
-    def chunk(kind: bytes, body: bytes) -> bytes:
-        return struct.pack(">I", len(body)) + kind + body + struct.pack(">I", zlib.crc32(kind + body))
 
-    return (SIGNATURE + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
-            + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b""))
+def _header(width: int, height: int) -> bytes:
+    return SIGNATURE + _chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+
+
+def write_rgba(width: int, height: int, pixels: bytes | bytearray) -> bytes:
+    return _header(width, height) + _chunk(b"IDAT", _deflated(width, height, pixels)) + _chunk(b"IEND", b"")
+
+
+def write_apng(width: int, height: int, frames: list[bytes | bytearray], delays: list[int]) -> bytes:
+    """An animated PNG (full-size RGBA frames, each shown for its delay in ms,
+    at most 65535). It loops; Kodi plays every animation in a loop, so one
+    meant to play once ends on a long last delay."""
+    out = [_header(width, height), _chunk(b"acTL", struct.pack(">II", len(frames), 0))]
+    seq = 0
+    for i, (pixels, delay) in enumerate(zip(frames, delays)):
+        # fcTL: size, offset, delay (numerator/denominator: ms), dispose none, blend source.
+        out.append(_chunk(b"fcTL", struct.pack(">IIIIIHHBB", seq, width, height, 0, 0,
+                                               min(int(delay), 65535), 1000, 0, 0)))
+        seq += 1
+        data = _deflated(width, height, pixels)
+        if i == 0:
+            out.append(_chunk(b"IDAT", data))
+        else:
+            out.append(_chunk(b"fdAT", struct.pack(">I", seq) + data))
+            seq += 1
+    out.append(_chunk(b"IEND", b""))
+    return b"".join(out)
 
 
 def tip(width: int, height: int, pixels: bytearray, threshold: int = 128) -> tuple[int, int]:

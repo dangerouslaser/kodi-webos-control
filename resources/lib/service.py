@@ -662,11 +662,13 @@ class WebOsService:
                                        self.focus, self._tv_pointer_settings,
                                        wheel if wheel.open() else None, _receiver_ready,
                                        self.controller.reconnect_now, self._bridge_remote,
-                                       self._bring_back_kodi)
+                                       self._bring_back_kodi, self._pointer_look,
+                                       lambda: xbmc.getCondVisibility("Window.IsVisible(10099)"))  # the pointer
             await self.bridge.start()
 
         self._submit(create()).result(timeout=5)
         self.publish_setting_labels()
+        self._publish_pointer_animated()
         self.monitor = _Monitor(self)
         self.player = _Player(self)
         log.info(
@@ -820,6 +822,12 @@ class WebOsService:
 
         window = xbmcgui.Window(10000)
         s = self.settings
+        # MousePointerStays: a Kodi with yblod's patch leaves the mouse pointer
+        # up on a button ("nomove": the arrows still hide it, as on the TV).
+        if s.bridge_pointer:
+            window.setProperty("MousePointerStays", "true" if s.bridge_pointer_arrows else "nomove")
+        else:
+            window.clearProperty("MousePointerStays")
         # Kodi's input, with the TV's name for it when known.
         kodi_input = s.kodi_input
         state = getattr(self.controller, "state", None)
@@ -930,6 +938,29 @@ class WebOsService:
         else:
             window.clearProperty("WebOS.Remote")
 
+    def _pointer_look(self, look: str) -> None:
+        """Loop thread: WebOS.PointerLook, the animation Pointer.xml gives the
+        pointer (cursor.ANIMATIONS: scrolling, appearing, going) when the TV
+        sent its animations; empty otherwise."""
+        from . import cursor, storage  # noqa: PLC0415
+
+        window = xbmcgui.Window(10000)
+        if look and cursor.has_animations(storage.data_path("pointer")):
+            window.setProperty("WebOS.PointerLook", look)
+        else:
+            window.clearProperty("WebOS.PointerLook")
+
+    @staticmethod
+    def _publish_pointer_animated() -> None:
+        """WebOS.PointerAnimated: Pointer.xml plays the TV's press animation."""
+        from . import cursor, storage  # noqa: PLC0415
+
+        window = xbmcgui.Window(10000)
+        if cursor.has_animations(storage.data_path("pointer")):
+            window.setProperty("WebOS.PointerAnimated", "true")
+        else:
+            window.clearProperty("WebOS.PointerAnimated")
+
     def _tv_cursor(self, images: dict[str, bytes], hotspot: str) -> None:
         """Loop thread: the TV's own pointer images, for the skin's Pointer.xml.
 
@@ -945,6 +976,7 @@ class WebOsService:
                 None, cursor.install, images, storage.data_path("pointer"), hotspot)
             log.info(f"remote bridge: using the TV's own pointer ({', '.join(sorted(paths))})"
                      + (", new images" if changed else ""))
+            self._publish_pointer_animated()
             if changed and not self.closing and not xbmc.getCondVisibility("Player.HasMedia"):
                 xbmc.executebuiltin("ReloadSkin()")
 

@@ -30,7 +30,8 @@ EV_SYN, EV_KEY, EV_REL, EV_ABS = 0x00, 0x01, 0x02, 0x03
 SYN_REPORT = 0
 ABS_X, ABS_Y = 0x00, 0x01
 REL_WHEEL = 0x08
-# A pointer needs buttons for udev to call it a mouse; they're never pressed.
+# A pointer needs buttons for udev to call it a mouse. The left one clicks
+# (button()): a mouse click keeps Kodi's pointer up, a button press hides it.
 BTN_LEFT, BTN_RIGHT, BTN_MIDDLE = 0x110, 0x111, 0x112
 ABS_MAX = 32767
 BUS_VIRTUAL = 0x06
@@ -78,16 +79,23 @@ class VirtualWheel:
 
     def wheel(self, x: float, y: float, notches: int) -> bool:
         """Scroll at (x, y), fractions of the screen; notches > 0 scroll up."""
+        return self._send([(EV_ABS, ABS_X, _abs(x)), (EV_ABS, ABS_Y, _abs(y)),
+                           (EV_REL, REL_WHEEL, notches), (EV_SYN, SYN_REPORT, 0)])
+
+    def button(self, x: float, y: float, down: bool) -> bool:
+        """Press (or release) the left button at (x, y), fractions of the screen."""
+        return self._send([(EV_ABS, ABS_X, _abs(x)), (EV_ABS, ABS_Y, _abs(y)),
+                           (EV_KEY, BTN_LEFT, int(down)), (EV_SYN, SYN_REPORT, 0)])
+
+    def _send(self, events: list[tuple[int, int, int]]) -> bool:
         if self._fd is None:
             return False
-        events = [(EV_ABS, ABS_X, _abs(x)), (EV_ABS, ABS_Y, _abs(y)),
-                  (EV_REL, REL_WHEEL, notches), (EV_SYN, SYN_REPORT, 0)]
         now = time.time()
         sec, usec = int(now), int(now % 1 * 1_000_000)
         try:
             os.write(self._fd, b"".join(EVENT.pack(sec, usec, *e) for e in events))
         except OSError as err:
-            log.warning(f"remote bridge: virtual wheel failed: {err}")
+            log.warning(f"remote bridge: virtual mouse failed: {err}")
             self.close()
             return False
         return True

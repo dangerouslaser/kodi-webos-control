@@ -120,3 +120,61 @@ def test_pointers_that_point_other_ways(tmp_path, hotspot, flip_x, flip_y):
                               hotspot=hotspot)
     w, h, px = pngutil.read_rgba(open(paths["point"], "rb").read())
     assert pngutil.corner(w, h, px, which=hotspot[-2:]) == cursor.HOTSPOT
+
+
+def apng_frames(data):
+    """(frame count from acTL, [(delay ms, frame data chunk kind)]) of an APNG."""
+    pos, count, frames = 8, None, []
+    while pos < len(data):
+        length, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + length]
+        assert zlib.crc32(kind + body) == struct.unpack(">I", data[pos + 8 + length:pos + 12 + length])[0]
+        if kind == b"acTL":
+            count = struct.unpack(">I", body[:4])[0]
+        elif kind == b"fcTL":
+            num, den = struct.unpack(">HH", body[20:24])
+            frames.append([num * 1000 // den, None])
+        elif kind in (b"IDAT", b"fdAT"):
+            frames[-1][1] = kind
+        pos += 12 + length
+    return count, [tuple(f) for f in frames]
+
+
+def test_apng_plays_its_frames_then_holds():
+    a, b = image(4, 4, lambda x, y: x < 2), image(4, 4, lambda x, y: y < 2)
+    data = pngutil.write_apng(4, 4, [a, b, a], [33, 33, 65535])
+    assert pngutil.read_rgba(data) == (4, 4, a)  # its first frame is the still image
+    assert apng_frames(data) == (3, [(33, b"IDAT"), (33, b"fdAT"), (65535, b"fdAT")])
+
+
+def frames_for_every_animation(shape=None):
+    shape = shape or pointed_circle
+    return {f"{name}{i}": encode(30, 30, image(30, 30, shape), [0])
+            for name, (count, _) in cursor.FRAME_SETS.items() for i in range(count)}
+
+
+def test_install_builds_the_animations(tmp_path):
+    frames = frames_for_every_animation()
+    png = encode(30, 30, image(30, 30, pointed_circle), [0])
+    paths, changed = cursor.install({"point": png, **frames}, str(tmp_path), hotspot="corner")
+    assert changed and cursor.has_animations(str(tmp_path))
+    for look, (_, sequence) in cursor.ANIMATIONS.items():
+        data = open(paths[f"anim_{look}"], "rb").read()
+        count, played = apng_frames(data)
+        assert count == len(sequence) and played[-1][0] == 65535
+        w, h, px = pngutil.read_rgba(data)
+        assert (w, h) == cursor.CANVAS and pngutil.corner(w, h, px) == cursor.HOTSPOT
+    assert cursor.install({"point": png, **frames}, str(tmp_path), hotspot="corner")[1] is False
+    # A frame missing (an older TV): no animations, and the old ones go.
+    del frames["press3"]
+    paths, changed = cursor.install({"point": png, **frames}, str(tmp_path), hotspot="corner")
+    assert changed and not cursor.has_animations(str(tmp_path)) and list(paths) == ["point"]
+
+
+def test_an_animation_is_placed_by_its_full_size_frame(tmp_path):
+    """Appearing grows from a dot: its last frame (the whole pointer) sets the hotspot."""
+    frames = frames_for_every_animation()
+    frames["enter0"] = encode(30, 30, image(30, 30, lambda x, y: 12 <= x < 16 and 12 <= y < 16), [0])
+    paths, _ = cursor.install(frames, str(tmp_path), hotspot="corner")
+    w, h, px = pngutil.read_rgba(open(paths["anim_enter"], "rb").read())  # its first frame: the dot
+    assert pngutil.corner(w, h, px) == (cursor.HOTSPOT[0] + 8, cursor.HOTSPOT[1] + 8)

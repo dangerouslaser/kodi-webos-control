@@ -430,7 +430,7 @@ async def test_pointer_stays_up_with_the_tvs_auto_hide_off(kodi_side):
         info["tv"] = {"cursorAutoRemover": "off"}
         rb._keep_pointer(info)
         rb._keep_pointer(info)
-        assert [m[:2] for m in mouse.moves[1:]] == [(901, 500), (900, 500)]
+        assert [m[:2] for m in mouse.moves[1:]] == [(900 + round(1920 * bridge.NUDGE), 500), (900, 500)]
         info["hidden_at"] = (900, 500)  # a button hid it: stays hidden
         rb._keep_pointer(info)
         assert len(mouse.moves) == 3
@@ -491,14 +491,210 @@ class Wheel:
     def __init__(self, works=True):
         self.works = works
         self.scrolls = []
+        self.clicks = []
         self.closed = False
 
     def wheel(self, x, y, notches):
         self.scrolls.append((round(x, 3), round(y, 3), notches))
         return self.works
 
+    def button(self, x, y, down):
+        self.clicks.append((round(x, 3), round(y, 3), down))
+        return self.works
+
     def close(self):
         self.closed = True
+
+
+async def test_the_pointer_looks(kodi_side, monkeypatch):
+    """Scrolling turns it into the wheel; it plays "enter" as it appears and
+    "exit" just before Kodi hides it when idle (the TV's auto-hide on)."""
+    monkeypatch.setattr(bridge, "WHEEL_LOOK_HOLD", 0.15)
+    monkeypatch.setattr(bridge, "WHEEL_LOOK_END", 0.15)
+    monkeypatch.setattr(bridge, "ENTER_TIME", 0.03)
+    monkeypatch.setattr(bridge, "POINTER_VISIBLE", 0.6)
+    monkeypatch.setattr(bridge, "EXIT_LEAD", 0.1)
+    monkeypatch.setattr(bridge, "EXIT_TIME", 0.1)
+    looks = []
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(), wheel=Wheel(),
+                      on_pointer_look=looks.append)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+
+        async def send(*msgs, wait=0.05):
+            for msg in msgs:
+                writer.write(json.dumps(msg).encode() + b"\n")
+                await writer.drain()
+                await asyncio.sleep(wait)
+
+        await send({"tv": {"cursorAutoRemover": "on"}}, {"pos": [960, 270]})
+        assert looks == ["enter", ""]
+        await send({"wheel": -1}, {"wheel": -1}, {"wheel": 1}, {"wheel": 1})
+        assert looks[2:] == ["down", "upx"]  # turned back with the wheel already showing
+        await asyncio.sleep(0.12)  # 0.17 s after the last notch
+        assert looks[4:] == ["end"]
+        await asyncio.sleep(0.15)
+        assert looks[5:] == [""]
+        await asyncio.sleep(0.22)  # 0.54 s after the last notch: Kodi hides it at 0.6
+        assert looks[6:] == ["exit"]
+        await asyncio.sleep(0.12)
+        assert looks[7:] == [""]
+        await send({"pos": [1500, 600]})  # back again
+        assert looks[8:] == ["enter", ""]
+    finally:
+        await rb.close()
+
+
+async def test_the_wheel_look_shows_for_a_notch_short_of_an_item(kodi_side):
+    """At a slow wheel speed a notch may not scroll a whole item; the pointer
+    still turns into the wheel."""
+    looks = []
+    settings = dataclasses.replace(POINTER, bridge_wheel_speed=1 / 3)
+    rb = RemoteBridge(settings, kodi_side.execute, lambda: True, None, Mouse(), wheel=Wheel(),
+                      on_pointer_look=looks.append)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"pos": [960, 270]}, {"wheel": -1}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.05)
+        assert "down" in looks
+    finally:
+        await rb.close()
+
+
+@pytest.mark.parametrize(("key", "virtual_mouse"), [(158, True), (28, False)])
+async def test_buttons_other_than_the_arrows_keep_the_pointer_up(kodi_side, monkeypatch, key, virtual_mouse):
+    """Back, or a click with no virtual mouse: Kodi hides the pointer on the
+    button, so it's put back (a few units over, then where it was)."""
+    monkeypatch.setattr(bridge, "POINTER_BACK", (0.05, 0.1))
+    mouse = Mouse()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse,
+                      wheel=Wheel() if virtual_mouse else None)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"pos": [960, 270]}, {"key": key, "value": 1}, {"key": key, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.15)
+        assert kodi_side.actions == ["back" if key == 158 else "select"]
+        assert [m[:2] for m in mouse.moves] == [(960, 270), (960 + round(1920 * bridge.NUDGE), 270), (960, 270)]
+    finally:
+        await rb.close()
+
+
+async def test_a_kodi_that_kept_the_pointer_up_isnt_nudged(kodi_side, monkeypatch):
+    """A Kodi patched to leave the pointer up on a button (MousePointerStays):
+    the pointer isn't moved after Back."""
+    monkeypatch.setattr(bridge, "POINTER_BACK", (0.05, 0.1))
+    mouse = Mouse()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse, wheel=Wheel(),
+                      kodi_pointer_up=lambda: True)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"pos": [960, 270]}, {"key": 158, "value": 1}, {"key": 158, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.15)
+        assert kodi_side.actions == ["back"]
+        assert [m[:2] for m in mouse.moves] == [(960, 270)]
+    finally:
+        await rb.close()
+
+
+@pytest.mark.parametrize("known", [True, False])
+async def test_arrows_can_keep_the_pointer_up_on_the_focused_item(kodi_side, monkeypatch, known):
+    monkeypatch.setattr(bridge, "POINTER_BACK", (0.05, 0.1))
+
+    class Focus:
+        def spot(self):
+            return (480, 810) if known else None  # skin coordinates
+
+        def key(self):
+            pass
+
+        def track(self, x, y):
+            pass
+
+        def restore(self):
+            pass
+
+    mouse = Mouse()
+    settings = dataclasses.replace(POINTER, bridge_pointer_arrows=True)
+    rb = RemoteBridge(settings, kodi_side.execute, lambda: True, None, mouse, focus=Focus(), wheel=Wheel())
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"tv": {"cursorAutoRemover": "off"}}, {"pos": [960, 270]},
+                    {"key": 108, "value": 1}, {"key": 108, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.01)
+        await asyncio.sleep(0.15)
+        assert kodi_side.actions == ["down"]
+        moves = [m[:2] for m in mouse.moves]
+        if known:  # onto the focused item, and the TV's pointer with it
+            assert moves == [(960, 270), (480 + round(1920 * bridge.NUDGE), 810), (480, 810)]
+            sent = []
+            while True:
+                try:
+                    sent.append(await asyncio.wait_for(read_msg(reader), 0.05))
+                except asyncio.TimeoutError:
+                    break
+            assert {"warp": [480, 810]} in sent
+        else:  # nowhere to put it: hidden, as without the setting
+            assert moves == [(960, 270)]
+    finally:
+        await rb.close()
+
+
+async def test_a_click_is_a_mouse_click(kodi_side):
+    """With the virtual mouse, OK while pointing clicks where the pointer is:
+    Kodi keeps its pointer up, so nothing needs putting back."""
+    mouse, wheel = Mouse(), Wheel()
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, mouse, wheel=wheel)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"pos": [960, 270]}, {"key": 28, "value": 1}, {"key": 28, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.02)
+        await asyncio.sleep(0.6)
+        assert wheel.clicks == [(0.5, 0.25, True), (0.5, 0.25, False)]
+        assert kodi_side.actions == []
+        assert [m[:2] for m in mouse.moves] == [(960, 270)]
+    finally:
+        await rb.close()
+
+
+async def test_a_button_hides_the_pointer_without_its_looks(kodi_side):
+    looks = []
+    rb = RemoteBridge(POINTER, kodi_side.execute, lambda: True, None, Mouse(), wheel=Wheel(),
+                      on_pointer_look=looks.append)
+    await rb.start()
+    try:
+        reader, writer = await connect_pointer(rb)
+        await read_msg(reader)
+        for msg in ({"pos": [960, 270]}, {"wheel": -1}, {"key": 103, "value": 1}, {"key": 103, "value": 0}):
+            writer.write(json.dumps(msg).encode() + b"\n")
+            await writer.drain()
+            await asyncio.sleep(0.02)
+        assert looks == ["enter", "down", ""]  # Kodi hides it at once
+    finally:
+        await rb.close()
 
 
 @pytest.mark.parametrize("works", [True, False])

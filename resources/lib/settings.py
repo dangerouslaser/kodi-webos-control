@@ -129,6 +129,7 @@ class Settings:
     bridge_pointer: bool = False
     bridge_pointer_wake: int = 300
     bridge_pointer_return: bool = True
+    bridge_pointer_arrows: bool = False  # the arrows keep the pointer up, on the focused item
     bridge_volume_receiver: bool = False
     # Remote app buttons (remotes.APP_BUTTONS) that bring back Kodi, from anywhere on the TV.
     kodi_buttons: frozenset[int] = frozenset()
@@ -190,6 +191,7 @@ class Settings:
             bridge_pointer=addon.getSettingBool("bridge_pointer"),
             bridge_pointer_wake=_wake(addon),
             bridge_pointer_return=addon.getSettingBool("bridge_pointer_return"),
+            bridge_pointer_arrows=addon.getSettingBool("bridge_pointer_arrows"),
             bridge_volume_receiver=addon.getSettingBool("bridge_volume_receiver"),
             kodi_buttons=_codes(addon.getSetting("kodi_buttons")),
             bridge_wheel_speed=_wheel_speed(addon),
