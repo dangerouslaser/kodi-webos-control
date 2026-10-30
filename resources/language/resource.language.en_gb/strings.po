@@ -636,7 +636,7 @@ msgid "Remote Bridge port"
 msgstr ""
 
 msgctxt "#32651"
-msgid "While Kodi is on screen, the LG remote's buttons control Kodi over the network, in place of HDMI-CEC. Needs a rooted TV with Homebrew Channel and the Remote Bridge app: use Set up."
+msgid "While Kodi is on screen, the LG remote's buttons control Kodi over the network, in place of HDMI-CEC: the bridge takes the remote over from the TV then and hands back the buttons Kodi doesn't use, such as volume, Home held and power. Needs a rooted TV with Homebrew Channel and the Remote Bridge app: use Set up."
 msgstr ""
 
 msgctxt "#32652"
@@ -704,7 +704,7 @@ msgid "Use the remote's pointer in Kodi"
 msgstr ""
 
 msgctxt "#32655"
-msgid "While Kodi is on screen, the Magic Remote's pointer moves Kodi's mouse and a click selects. The bridge takes the remote over from the TV then (no TV pointer or input banners) and hands back the buttons Kodi doesn't use, such as volume, Home and power."
+msgid "While Kodi is on screen, the Magic Remote's pointer moves Kodi's mouse and a click selects. Off, Kodi shows no pointer (the TV draws none over Kodi either)."
 msgstr ""
 
 msgctxt "#32606"

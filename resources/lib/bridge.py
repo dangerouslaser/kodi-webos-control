@@ -3,13 +3,14 @@
 On a rooted TV the Remote Bridge app (github.com/dangerouslaser/kodi-remote-bridge)
 runs a small daemon that reads the remote's input devices and streams every
 button press here over TCP. Presses become Kodi actions while Kodi's input is
-on screen and are ignored otherwise; the TV keeps handling them as usual.
+on screen and are ignored otherwise.
 
-With the pointer on, Kodi has the daemon take the remote over while Kodi is on
-screen ("grab"): the TV then draws no pointer of its own and shows no input
-banners, the pointer moves Kodi's mouse, and the daemon hands every button Kodi
-doesn't use (volume, Home, power...) back to the TV. The grab message doubles as
-a heartbeat; the daemon releases the remote when it stops.
+While Kodi is on screen Kodi has the daemon take the remote over ("grab"): the
+TV then sees none of its buttons, draws no pointer of its own and shows no
+input banners, and the daemon hands every button Kodi doesn't use (volume,
+Home, power...) back to the TV. With the pointer on, the pointer moves Kodi's
+mouse. Elsewhere the TV has the remote as usual. The grab message doubles as a
+heartbeat; the daemon releases the remote when it stops.
 
 Protocol, one JSON object per line:
     <- {"hello": {"token", "version", "python", "devices", "pointer": [max_x, max_y]}}
@@ -359,11 +360,14 @@ class RemoteBridge:
     def refresh(self) -> None:
         """TV state changed: take the remote over or hand it back right away."""
         for writer, info in self._clients.items():
-            if info.get("grab") != self._grab_wanted() or info.get("consume") != self._consume():
+            if (info.get("grab") != self._grab_wanted() or info.get("consume") != self._consume()
+                    or info.get("sent_pointer") != self.settings.bridge_pointer):
                 self._send_grab(writer, info)
 
     def _grab_wanted(self) -> bool:
-        return (self.settings.bridge_pointer or self._volume_to_receiver()) and self._on_screen()
+        # Always while Kodi is on screen: a button the TV also saw would act twice,
+        # in Kodi and on the TV (the pointer and the receiver's volume only add to it).
+        return self.settings.remote_bridge and self._on_screen()
 
     def _volume_to_receiver(self) -> bool:
         return self.settings.bridge_volume_receiver and self._receiver_ready()
@@ -380,7 +384,8 @@ class RemoteBridge:
         grab = self._grab_wanted()
         info["grab"] = grab
         consume = info["consume"] = self._consume()
-        msg = {"grab": grab, "consume": consume, "pointer": self.settings.bridge_pointer}
+        pointer = info["sent_pointer"] = self.settings.bridge_pointer
+        msg = {"grab": grab, "consume": consume, "pointer": pointer}
         with contextlib.suppress(OSError, RuntimeError):
             writer.write(json.dumps(msg).encode() + b"\n")
 

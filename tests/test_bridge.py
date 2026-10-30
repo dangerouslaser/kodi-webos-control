@@ -203,7 +203,8 @@ async def test_turning_it_off_closes_the_tv_connection(kodi_side):
         await reader.readline()
         rb.update(dataclasses.replace(BASE, remote_bridge=False))
         rest = await asyncio.wait_for(reader.read(), 2.0)  # reads to EOF: the connection closed
-        assert all(json.loads(line)["grab"] is False for line in rest.splitlines())
+        grabs = [json.loads(line)["grab"] for line in rest.splitlines() if "grab" in json.loads(line)]
+        assert grabs and grabs[-1] is False   # handed back to the TV before closing
         assert rb.status()["remote_bridge_listening"] is False
     finally:
         await rb.close()
@@ -286,8 +287,9 @@ async def test_pointer_takes_the_remote_over_only_while_kodi_is_on_screen(kodi_s
         kodi_side.on_screen = True
         rb.refresh()
         assert (await read_msg(reader))["grab"] is True
-        rb.update(BASE)  # pointer turned off: hand the remote back
-        assert (await read_msg(reader))["grab"] is False
+        rb.update(BASE)  # pointer turned off: still taken over, without the pointer
+        grab = await read_msg(reader)
+        assert grab["grab"] is True and grab["pointer"] is False
     finally:
         await rb.close()
     assert mouse.closed
@@ -320,7 +322,8 @@ async def test_pointer_click_ignored_with_the_pointer_off(kodi_side):
     await rb.start()
     try:
         reader, writer = await connect_pointer(rb)
-        assert (await read_msg(reader))["grab"] is False
+        grab = await read_msg(reader)
+        assert grab["grab"] is True and grab["pointer"] is False   # taken over all the same
         for msg in ({"pos": [1, 2]}, {"key": 272, "value": 1}, {"key": 272, "value": 0},
                     {"key": BACK, "value": 1}):
             writer.write(json.dumps(msg).encode() + b"\n")
@@ -1292,16 +1295,24 @@ async def test_home_goes_to_kodis_home_and_held_to_the_tvs(kodi_side, monkeypatc
         await rb.close()
 
 
-async def test_home_stays_with_the_tv_when_the_remote_isnt_taken_over(kodi_side):
-    rb = RemoteBridge(BASE, kodi_side.execute, lambda: True, None, Mouse())
+async def test_the_remote_is_taken_over_without_the_pointer_too(kodi_side):
+    """Kodi on screen takes the remote from the TV whatever the pointer and volume
+    settings: otherwise every button would act on the TV as well. Home is Kodi's."""
+    rb = RemoteBridge(BASE, kodi_side.execute, lambda: kodi_side.on_screen, None, Mouse())
     await rb.start()
     try:
         reader, writer = await connect_pointer(rb)
-        assert (await read_msg(reader))["grab"] is False
+        grab = await read_msg(reader)
+        assert grab["grab"] is True and grab["pointer"] is False
+        assert {28, 103, 412} <= set(grab["consume"])
+        assert 115 not in grab["consume"]  # volume stays with the TV
         for msg in ({"key": 102, "value": 1}, {"key": 102, "value": 0}, {"key": BACK, "value": 1}):
             writer.write(json.dumps(msg).encode() + b"\n")
         await writer.drain()
-        await wait_for(lambda: kodi_side.actions == ["back"])
+        await wait_for(lambda: kodi_side.actions == ["kodihome", "back"])
+        kodi_side.on_screen = False
+        rb.refresh()
+        assert (await read_until(reader, "grab"))["grab"] is False   # elsewhere the TV has it
     finally:
         await rb.close()
 
