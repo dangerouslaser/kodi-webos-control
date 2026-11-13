@@ -1536,3 +1536,41 @@ def test_volume_buttons_go_to_sonos_or_denon(kodi, sonos, denon, chose_sonos, ta
                     " + String.IsEqual(Window(Home).Property(Denon.Power),true)"] = denon
     kodi.conditions["Skin.HasSetting(setup_receiver_sonos)"] = chose_sonos
     assert _receiver_target() == target
+
+
+DENON_ON = ("String.IsEqual(Window(Home).Property(Denon.Connected),true)"
+            " + String.IsEqual(Window(Home).Property(Denon.Power),true)")
+
+
+@pytest.mark.parametrize(("wanted", "denon_on", "current", "shows"), [
+    ("", True, "BD", True),            # not set: the TV input alone decides
+    ("GAME", True, "GAME", True),
+    ("game", True, "GAME", True),      # any case
+    ("Kodi - yblod", True, "GAME", True),  # the receiver's own name for the input
+    ("GAME", True, "BD", False),       # another box behind the receiver
+    ("GAME", False, "BD", True),       # receiver off or not followed: unknown, TV decides
+    ("GAME", True, "", True),
+])
+def test_remote_follows_the_receivers_input(kodi, wanted, denon_on, current, shows):
+    from resources.lib.service import _receiver_shows_kodi
+
+    kodi.conditions[DENON_ON] = denon_on
+    kodi.info_labels["Window(Home).Property(Denon.Input)"] = current
+    kodi.info_labels["Window(Home).Property(Denon.InputName)"] = "Kodi - yblod" if current == "GAME" else ""
+    assert _receiver_shows_kodi(Settings(receiver_input=wanted)) is shows
+
+
+def test_receiver_input_is_learned_when_a_video_starts(kodi):
+    from types import SimpleNamespace
+
+    import xbmcaddon
+
+    from resources.lib import service as service_mod
+
+    kodi.conditions[DENON_ON] = True
+    kodi.info_labels["Window(Home).Property(Denon.Input)"] = "GAME"
+    service_mod.WebOsService._learn_receiver_input(SimpleNamespace(settings=Settings()))
+    assert xbmcaddon.settings["receiver_input"] == "GAME"
+    kodi.info_labels["Window(Home).Property(Denon.Input)"] = "BD"
+    service_mod.WebOsService._learn_receiver_input(SimpleNamespace(settings=Settings(receiver_input="GAME")))
+    assert xbmcaddon.settings["receiver_input"] == "GAME"  # once set, kept

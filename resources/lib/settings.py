@@ -118,6 +118,7 @@ class Settings:
     rules_debounce: float = 1.5
     # TV integration
     kodi_input: str = ""
+    receiver_input: str = ""  # the AV receiver input Kodi is on (service.denonavr), e.g. GAME
     on_tv_off: str = "none"
     on_switch_away: str = "none"
     resume_on_return: bool = True
@@ -181,6 +182,7 @@ class Settings:
             restore_on_stop=addon.getSettingBool("restore_on_stop"),
             rules_debounce=number("rules_debounce", 1.5),
             kodi_input=addon.getSetting("kodi_input").strip(),
+            receiver_input=addon.getSetting("receiver_input").strip(),
             on_tv_off=_option(addon, "on_tv_off", TV_OFF_ACTIONS),
             on_switch_away=_option(addon, "on_switch_away", SWITCH_AWAY_ACTIONS),
             resume_on_return=addon.getSettingBool("resume_on_return"),

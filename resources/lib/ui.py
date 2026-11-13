@@ -461,6 +461,7 @@ def show_status(info: dict[str, Any]) -> None:
         f"Motion smoothing (last set): {info.get('motion') or '-'}",
         f"Kodi's TV input: {info.get('kodi_input') or 'not set'}"
         + {True: " (on screen)", False: " (not on screen)"}.get(info.get("kodi_on_screen"), ""),
+        *([f"Kodi's receiver input: {info['receiver_input']}"] if info.get("receiver_input") else []),
         "Transparent control: "
         + ("active" if info.get("transparent_active")
            else "on, waiting" if info.get("transparent_control") else "off"),

@@ -475,6 +475,24 @@ def _receiver_ready() -> bool:
     return _receiver_target() is not None
 
 
+def _denon_input() -> tuple[str, str] | None:
+    """The input of the receiver service.denonavr follows, (code, name), or
+    None when there is none or it's off (any thread)."""
+    if not xbmc.getCondVisibility("String.IsEqual(Window(Home).Property(Denon.Connected),true)"
+                                  " + String.IsEqual(Window(Home).Property(Denon.Power),true)"):
+        return None
+    code = xbmc.getInfoLabel("Window(Home).Property(Denon.Input)")
+    return (code, xbmc.getInfoLabel("Window(Home).Property(Denon.InputName)")) if code else None
+
+
+def _receiver_shows_kodi(settings: Settings) -> bool:
+    """False only when the receiver is known to show another input than Kodi's
+    (one TV input, several boxes behind the receiver)."""
+    wanted = settings.receiver_input.casefold()
+    current = _denon_input() if wanted else None
+    return current is None or wanted in (current[0].casefold(), current[1].casefold())
+
+
 def _wheel_moves_focus() -> bool:
     """Windows where the wheel moves the highlight up and down: the TV and
     radio guides (Kodi scrolls their time with a wheel)."""
@@ -875,6 +893,7 @@ class WebOsService:
         call = self.loop.call_soon_threadsafe
         if event == "av_started":
             if content != "music":
+                self._learn_receiver_input()
                 call(self.rules.av_started, hdr, fps, content, height)
                 if self.watcher is not None:
                     call(self.watcher.video_started)
@@ -1031,13 +1050,21 @@ class WebOsService:
         else:
             _press_button(button)
 
+    def _learn_receiver_input(self) -> None:
+        """Kodi thread: a video started, so the receiver (if any) is on Kodi's
+        input; remember it the first time (saving reloads the settings)."""
+        current = None if self.settings.receiver_input else _denon_input()
+        if current is not None:
+            log.info(f"learned Kodi's receiver input (video started): {current[0]} ({current[1]})")
+            xbmcaddon.Addon(ADDON_ID).setSetting("receiver_input", current[0])
+
     def _kodi_on_screen(self) -> bool:
         """Loop thread: True only when the TV is known to be showing Kodi."""
         from .watcher import kodi_foreground  # noqa: PLC0415
 
         if self.controller is None:
             return False
-        return kodi_foreground(self.settings, self.controller.state) is True
+        return kodi_foreground(self.settings, self.controller.state) is True and _receiver_shows_kodi(self.settings)
 
     def forward(self, name: str, args: list[Any]) -> None:
         """Run an action for transparent control; no reply, errors logged."""

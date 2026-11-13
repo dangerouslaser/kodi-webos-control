@@ -207,6 +207,7 @@ class TvWatcher:
     def status(self) -> dict:
         return {
             "kodi_input": self.settings.kodi_input,
+            "receiver_input": self.settings.receiver_input,
             "kodi_on_screen": self._foreground,
             "transparent_control": self.settings.transparent_control,
             "transparent_active": self._overlay,

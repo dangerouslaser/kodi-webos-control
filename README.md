@@ -171,6 +171,11 @@ accepts all of these but reports none, so it shows the last value sent from Kodi
   when you change any addon setting (the TV must be showing Kodi then) or when a video plays;
   *Choose…* picks it from the TV's list. Not needed when Kodi runs on the TV. *Status* shows the
   learned input and whether transparent control is active.
+- **Kodi's receiver input**: with an AV receiver between Kodi and the TV (and service.denonavr
+  following it), the receiver input Kodi is on (e.g. `GAME`). The Remote Bridge takes the remote
+  over only while the receiver is on this input, so another box behind the same receiver (on the
+  same TV input) keeps the TV remote. Learned automatically when a video plays; empty means the TV
+  input alone decides.
 - **When the TV turns off**: do nothing, pause, stop, or shut down. Shut down runs Kodi's own
   shutdown function (*Settings → System → Power saving*) after 20 s, and is cancelled if the TV
   comes back on. A dropped connection counts as "off" after 15 s.

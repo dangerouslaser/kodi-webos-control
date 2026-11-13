@@ -274,6 +274,10 @@ msgctxt "#32206"
 msgid "Transparent control"
 msgstr ""
 
+msgctxt "#32207"
+msgid "Kodi's receiver input"
+msgstr ""
+
 msgctxt "#32210"
 msgid "Do nothing"
 msgstr ""
@@ -296,6 +300,10 @@ msgstr ""
 
 msgctxt "#32252"
 msgid "Pick Kodi's input from the TV's list."
+msgstr ""
+
+msgctxt "#32257"
+msgid "With an AV receiver between Kodi and the TV (service.denonavr): the receiver input Kodi is on, e.g. GAME. The TV remote drives Kodi only while the receiver is on this input, so another box on the same TV input keeps the remote. Learned automatically when a video plays. Empty: the TV input alone decides."
 msgstr ""
 
 msgctxt "#32253"
